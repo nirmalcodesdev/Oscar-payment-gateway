@@ -8,21 +8,18 @@ requirement indefinitely. A phase is complete only when its implementation,
 tests, security review, documentation, and operational acceptance criteria all
 pass on its dedicated branch.
 
-### Specification completeness prerequisite (`SPEC-00`)
+### Specification completeness prerequisite (`SPEC-00`) - Resolved
 
-`prompt.md` refers to an "original brief" for pre-existing fields, structural
-deliverables, and API details, but that brief is not present in this repository.
-Before Phase 01 implementation begins, the repository owner must do one of the
-following and record the decision in an architecture decision record:
+Accepted ADR 0001 records the repository owner's decision that the current
+`prompt.md` supersedes every prior or unavailable brief and is the complete
+authoritative specification for Oscar Payment Gateway v1. References in the
+prompt to an "original brief" introduce no unlisted v1 requirement.
 
-1. Add the original brief, assign its requirements traceable IDs, and update
-   this plan so every inherited requirement has an owning phase and test; or
-2. Explicitly declare that the current `prompt.md` supersedes the original brief
-   and is the complete implementation source of truth.
-
-Until one of those actions is recorded, planning may be reviewed and improved,
-but no phase may be declared specification-complete and real-funds production
-release remains blocked.
+Phase 01 may begin. Phase 12 must retain ADR 0001 as release evidence and verify
+all requirements explicitly present in `prompt.md`. An earlier brief discovered
+later changes nothing unless the owner accepts a new ADR and the traceability,
+implementation, tests, and release evidence are updated through the normal
+phase workflow.
 
 The implementation priority is:
 
@@ -71,6 +68,12 @@ These decisions remove ambiguity before implementation begins:
 - Chain registry policy: chains and tokens are admin-curated, created disabled,
   verified against independent RPC providers and live contracts, and only
   soft-disabled.
+- RPC ownership policy: infrastructure endpoints remain operator-configured.
+  Merchant webhook URLs are the narrow client-configured egress exception and
+  must use the dedicated SSRF controls accepted in ADR 0002.
+- viem ownership policy: Phase 04 introduces the shared low-level RPC and
+  contract-verification infrastructure; Phase 06 composes it into the EVM
+  adapter without creating a second client stack, as accepted in ADR 0003.
 - Webhook policy: emit status notifications only after durable state commits;
   confirmation notifications require confirmation depth, canonicality, and a
   clear compliance result. Delivery is at least once and signed.
@@ -152,11 +155,12 @@ Deliverables:
   `overpaymentFlag`, optimistic `version` incremented on every update,
   immutable `walletAddressId`, snapshotted `requiredConfirmations`, and
   `screeningStatus` limited to `clear | flagged | blocked | pending`, together
-  with all fields inherited from the resolved `SPEC-00` source.
+  with all other applicable fields explicitly specified in `prompt.md`.
 - Define the required `OnChainEvent` contract explicitly: unique `eventId`,
   verbatim `rawEvent`, optional unique event claim `matchedPaymentId`, immutable
   chain/contract/transaction/log identity, `canonical`, and optional
-  `confirmationsAtIngest`, together with all inherited fields.
+  `confirmationsAtIngest`, together with all other applicable fields explicitly
+  specified in `prompt.md`.
 - Define `ReorgRecord` with `chain`, `fromBlock`, `toBlock`, `detectedAt`,
   `orphanedTxHashes`, `affectedPaymentIds`, and optional `resolvedAt`.
 - Define `IdempotencyKey` with `key`, `scope`, request fingerprint, stored
@@ -645,7 +649,7 @@ is not sufficient. Phase 12 verifies that every row has current evidence.
 
 | ID | Prompt source | Owning phases | Required verification/evidence |
 | --- | --- | --- | --- |
-| `SPEC-00` | References to the original brief | Before 01, 12 | Original brief is added and traced, or an owner ADR explicitly declares `prompt.md` complete; unresolved status blocks specification-complete release. |
+| `SPEC-00` | References to the original brief | Resolved by ADR 0001; verified in 12 | Retain the accepted owner decision that `prompt.md` supersedes prior or unavailable briefs; verify no later source was silently treated as authoritative. |
 | `REQ-00` | Section 0 operating principles | All | Raw-event-first durability, replayable judgments, exactly-once event claims, confirmation/canonicality before irreversible action, server-owned truth, and fail-closed dependency/ambiguity tests remain green. |
 | `REQ-01` | Section 1 business, custody, tenants, regulation | 01, 03, 08, 11, 12 | Non-custodial architecture has no signing-material path; tenant isolation/IDOR tests pass; README exclusions and `COMPLIANCE.md` contain the required non-legal-advice and qualified-review language. |
 | `REQ-02` | Section 2 technology stack | 01, 02, 06, 10 | Strict TypeScript/Express, Mongoose replica-set transactions, viem/native `bigint`, BullMQ/Redis coordination, validated secret sources, pino/Prometheus/OpenTelemetry/error aggregation are built and exercised. |

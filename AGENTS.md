@@ -9,10 +9,14 @@ repository.
   decisions.
 - Treat `prompt.md` as the product, security, compliance, operations, and
   testing specification. Do not silently weaken or omit a requirement.
-- `prompt.md` references an "original brief" that is not currently present.
-  Do not claim specification completeness until that brief is added and traced,
-  or the repository owner explicitly records that `prompt.md` supersedes it and
-  is the complete source of truth.
+- The repository owner resolved the unavailable "original brief" in
+  `docs/adr/0001-authoritative-v1-specification.md`: the current `prompt.md`
+  supersedes all prior or unavailable briefs and is the complete authoritative
+  specification for v1. A later-discovered brief has no authority unless a new
+  owner-approved ADR changes this decision and updates traceability.
+- Follow accepted ADRs in `docs/adr/` as binding interpretations of choices or
+  tensions in `prompt.md`; an ADR may clarify or strengthen the specification
+  but must never weaken a hard requirement.
 - Use `phases.md` as the execution order and requirements traceability plan.
 - When requirements conflict, prioritize money correctness and idempotency,
   then security and fail-closed behavior, compliance hooks, observability,
