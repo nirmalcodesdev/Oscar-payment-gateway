@@ -1,0 +1,58 @@
+{
+  "name": "oscar-payment-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Non-custodial, multi-tenant cryptocurrency payment gateway",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev:api": "tsx watch src/processes/api.ts",
+    "dev:watcher": "tsx watch src/processes/watcher.ts",
+    "dev:processor": "tsx watch src/processes/processor.ts",
+    "dev:scheduler": "tsx watch src/processes/scheduler.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "start:api": "node --env-file-if-exists=.env dist/processes/api.js",
+    "start:watcher": "node --env-file-if-exists=.env dist/processes/watcher.js",
+    "start:processor": "node --env-file-if-exists=.env dist/processes/processor.js",
+    "start:scheduler": "node --env-file-if-exists=.env dist/processes/scheduler.js",
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run validate:compose && npm run validate:entrypoints",
+    "validate:compose": "node scripts/validate-compose.js",
+    "validate:entrypoints": "node scripts/validate-entrypoints.js",
+    "verify:ci-negative-controls": "node scripts/verify-ci-negative-controls.js"
+  },
+  "dependencies": {
+    "bullmq": "5.81.3",
+    "express": "5.1.0",
+    "ioredis": "5.7.0",
+    "mongoose": "8.24.3",
+    "pino": "9.9.0",
+    "pino-http": "10.5.0",
+    "viem": "2.55.13",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.34.0",
+    "@types/express": "5.0.3",
+    "@types/node": "24.3.0",
+    "@vitest/coverage-v8": "3.2.7",
+    "eslint": "9.34.0",
+    "eslint-config-prettier": "10.1.8",
+    "js-yaml": "4.3.1",
+    "prettier": "3.6.2",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.41.0",
+    "vitest": "3.2.7"
+  }
+}

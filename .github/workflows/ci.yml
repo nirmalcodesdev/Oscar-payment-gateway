@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run validate
+      - run: npm run test:coverage
+      - run: npm run verify:ci-negative-controls
+      - run: npm audit --audit-level=high
+
+  compose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: docker compose config --quiet
+      - run: docker compose up --build --wait --wait-timeout 180
+      - run: docker compose ps
+      - run: docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/ready').then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
+      - run: docker compose exec -T api node --input-type=module -e "import mongoose from 'mongoose'; await mongoose.connect(process.env.MONGODB_URI); const c=mongoose.connection.collection('ci_transactions'); await c.deleteMany({}); const s=await mongoose.startSession(); await s.withTransaction(async()=>c.insertOne({ok:true},{session:s})); await s.endSession(); if(await c.countDocuments({ok:true})!==1) process.exit(1); await mongoose.disconnect()"
+      - if: always()
+        run: docker compose down --volumes
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: anchore/scan-action@v6
+        with:
+          path: .
+          fail-build: true
+          severity-cutoff: high
