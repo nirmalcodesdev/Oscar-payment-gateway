@@ -1,0 +1,212 @@
+name: oscar-payment-gateway
+
+x-application: &application
+  build:
+    context: .
+    target: runtime
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  environment: &application-environment
+    NODE_ENV: development
+    LOG_LEVEL: info
+    SERVICE_NAME: oscar-payment-gateway
+    API_HOST: 0.0.0.0
+    API_PORT: 3000
+    SHUTDOWN_TIMEOUT_MS: 10000
+    MONGODB_URI: mongodb://oscar_app:local-app-password@mongodb:27017/oscar_payment_gateway?authSource=admin&replicaSet=rs0
+    MONGODB_REPLICA_SET: rs0
+    MONGODB_CONNECT_TIMEOUT_MS: 10000
+    REDIS_URL: redis://redis:6379
+    REDIS_CONNECT_TIMEOUT_MS: 10000
+    QUEUE_PREFIX: oscar
+  depends_on:
+    mongodb-init:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  networks:
+    - backend
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  stop_grace_period: 20s
+
+services:
+  mongodb:
+    build:
+      context: ./docker/mongodb
+    image: oscar-mongodb:8.0.13-local
+    restart: unless-stopped
+    command:
+      [
+        "mongod",
+        "--replSet",
+        "rs0",
+        "--bind_ip_all",
+        "--auth",
+        "--keyFile",
+        "/run/secrets/mongodb-keyfile",
+      ]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: local-root-password
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --username root --password local-root-password --authenticationDatabase admin --eval 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)' || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks:
+      - backend
+
+  mongodb-init:
+    image: mongo:8.0.13
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USERNAME: root
+      MONGO_ROOT_PASSWORD: local-root-password
+      MONGO_APP_USERNAME: oscar_app
+      MONGO_APP_PASSWORD: local-app-password
+      MONGO_REPLICA_SET: rs0
+    volumes:
+      - ./docker/mongodb/init-replica-set.js:/opt/oscar/init-replica-set.js:ro
+    entrypoint:
+      [
+        "mongosh",
+        "mongodb://mongodb:27017/admin",
+        "--quiet",
+        "--file",
+        "/opt/oscar/init-replica-set.js",
+      ]
+    networks:
+      - backend
+
+  redis:
+    image: redis:8.2.1-bookworm
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+
+  api:
+    <<: *application
+    command: ["node", "dist/processes/api.js"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api-host:
+    build:
+      context: ./docker/tcp-proxy
+    image: oscar-tcp-proxy:node24-local
+    restart: unless-stopped
+    environment:
+      LISTEN_PORT: 3000
+      TARGET_HOST: api
+      TARGET_PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - backend
+      - host-access
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    init: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const n=require('node:net').connect(+process.env.TARGET_PORT,process.env.TARGET_HOST,()=>{n.end();process.exit(0)});n.on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongodb-host:
+    image: oscar-tcp-proxy:node24-local
+    restart: unless-stopped
+    environment:
+      LISTEN_PORT: 27017
+      TARGET_HOST: mongodb
+      TARGET_PORT: 27017
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:27017:27017"
+    networks:
+      - backend
+      - host-access
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    init: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const n=require('node:net').connect(+process.env.TARGET_PORT,process.env.TARGET_HOST,()=>{n.end();process.exit(0)});n.on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  watcher:
+    <<: *application
+    command: ["node", "dist/processes/watcher.js"]
+
+  processor:
+    <<: *application
+    command: ["node", "dist/processes/processor.js"]
+
+  scheduler:
+    <<: *application
+    command: ["node", "dist/processes/scheduler.js"]
+
+networks:
+  backend:
+    internal: true
+  host-access:
+    driver: bridge
+
+volumes:
+  mongodb-data:
+  redis-data:
