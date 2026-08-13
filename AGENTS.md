@@ -28,6 +28,18 @@ repository.
 - Create a dedicated branch named `phase/NN-short-description` before changing
   implementation files for that phase. Do not implement phases directly on
   `main`.
+- At the start of every phase, before implementation changes, review the phase
+  for unresolved architectural, security, data-model, compliance, operational,
+  dependency, or technology decisions. Create the necessary ADRs in
+  `docs/adr/` and obtain their required acceptance before implementing code that
+  depends on those decisions. If existing requirements and accepted ADRs fully
+  govern the phase, record `No new ADR required` with the reviewed sources and
+  rationale in the phase validation evidence. This ADR review gate is mandatory
+  for every phase and may not be skipped.
+- ADRs document significant, durable decisions and their consequences; do not
+  create an empty ADR merely to announce that a phase started. Never use an ADR
+  to waive, defer, or weaken a hard requirement, validation gate, or production
+  safety control.
 - Keep the branch limited to the phase scope unless a prerequisite correction
   is necessary for safety or correctness. Document any scope change.
 - Implement production-quality code, tests, security controls, documentation,

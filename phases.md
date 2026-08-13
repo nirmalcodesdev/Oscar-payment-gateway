@@ -90,16 +90,23 @@ For each phase `NN`:
 
 1. Update local `main` and verify it is healthy.
 2. Create `phase/NN-short-description` from `main`.
-3. Implement only the phase scope and required prerequisites.
-4. Run the phase test matrix and the full regression suite available so far.
-5. Review security, tenant boundaries, amount handling, idempotency, logging,
+3. Before implementation changes, perform the mandatory ADR review for
+   unresolved architectural, security, data-model, compliance, operational,
+   dependency, and technology decisions. Accept required ADRs before dependent
+   code is implemented. If no ADR is needed, record `No new ADR required`, the
+   reviewed sources, and the rationale in the phase evidence. Do not create an
+   empty phase-start ADR, and never use an ADR to weaken a hard requirement.
+4. Implement only the phase scope and required prerequisites.
+5. Run the phase test matrix and the full regression suite available so far.
+6. Review security, tenant boundaries, amount handling, idempotency, logging,
    error responses, and operational failure behavior.
-6. Commit the completed phase with a concise imperative message that contains
+7. Commit the completed phase with a concise imperative message that contains
    no tool references, generated-content wording, personal name, or author
    attribution.
-7. Merge into `main` only after all implementation and validation gates pass.
-8. Tag or record the validation evidence where the repository workflow can
-   retain it.
+8. Merge into `main` only after all implementation and validation gates pass.
+9. Tag or record validation evidence, including the ADR review outcome and
+   accepted ADR numbers or the reviewed `No new ADR required` rationale, where
+   the repository workflow can retain it.
 
 No partial phase may be called complete or merged. Emergency corrections get
 their own narrowly scoped branch and the same validation discipline.
