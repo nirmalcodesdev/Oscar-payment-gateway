@@ -60,7 +60,8 @@ machine.
    ```
 
 3. Start MongoDB, initialize the replica set, start Redis, and start all four
-   application processes:
+   application processes. Compose runs the one-shot database migration with a
+   separate local migration identity before any runtime process starts:
 
    ```text
    docker compose up --build --wait
@@ -84,6 +85,12 @@ ingress or authentication boundary.
 
 The credentials and MongoDB key file in `compose.yaml` are fixed local-only
 development material. They must never be reused in staging or production.
+
+Production migrations are an explicit deployment step and use a database
+identity that is never mounted into runtime services. Runtime startup rejects
+an incompatible database version and keeps automatic index creation disabled.
+See `docs/PERSISTENCE.md` for deployment, least-privilege, validation, and
+rollback procedures.
 
 ## Validation
 

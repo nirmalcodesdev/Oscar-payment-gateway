@@ -2,9 +2,19 @@ const rootUsername = process.env.MONGO_ROOT_USERNAME;
 const rootPassword = process.env.MONGO_ROOT_PASSWORD;
 const appUsername = process.env.MONGO_APP_USERNAME;
 const appPassword = process.env.MONGO_APP_PASSWORD;
+const migrationUsername = process.env.MONGO_MIGRATION_USERNAME;
+const migrationPassword = process.env.MONGO_MIGRATION_PASSWORD;
 const replicaSet = process.env.MONGO_REPLICA_SET;
 
-if (!rootUsername || !rootPassword || !appUsername || !appPassword || !replicaSet) {
+if (
+  !rootUsername ||
+  !rootPassword ||
+  !appUsername ||
+  !appPassword ||
+  !migrationUsername ||
+  !migrationPassword ||
+  !replicaSet
+) {
   throw new Error("MongoDB initialization environment is incomplete");
 }
 
@@ -42,5 +52,16 @@ if (admin.getUser(appUsername) === null) {
     user: appUsername,
     pwd: appPassword,
     roles: [{ role: "readWrite", db: "oscar_payment_gateway" }],
+  });
+}
+
+if (admin.getUser(migrationUsername) === null) {
+  admin.createUser({
+    user: migrationUsername,
+    pwd: migrationPassword,
+    roles: [
+      { role: "readWrite", db: "oscar_payment_gateway" },
+      { role: "dbAdmin", db: "oscar_payment_gateway" },
+    ],
   });
 }

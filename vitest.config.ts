@@ -10,6 +10,11 @@ export default defineConfig({
       include: [
         "src/config/**/*.ts",
         "src/domain/errors/**/*.ts",
+        "src/domain/money/**/*.ts",
+        "src/infrastructure/mongodb/models.ts",
+        "src/infrastructure/mongodb/schema-helpers.ts",
+        "src/infrastructure/mongodb/audit-service.ts",
+        "src/infrastructure/mongodb/transactions.ts",
         "src/infrastructure/lifecycle/lifecycle-manager.ts",
         "src/infrastructure/lifecycle/readiness-probe.ts",
         "src/infrastructure/logging/**/*.ts",

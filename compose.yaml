@@ -22,7 +22,7 @@ x-application: &application
     REDIS_CONNECT_TIMEOUT_MS: 10000
     QUEUE_PREFIX: oscar
   depends_on:
-    mongodb-init:
+    mongodb-migrate:
       condition: service_completed_successfully
     redis:
       condition: service_healthy
@@ -78,6 +78,8 @@ services:
       MONGO_ROOT_PASSWORD: local-root-password
       MONGO_APP_USERNAME: oscar_app
       MONGO_APP_PASSWORD: local-app-password
+      MONGO_MIGRATION_USERNAME: oscar_migrate
+      MONGO_MIGRATION_PASSWORD: local-migration-password
       MONGO_REPLICA_SET: rs0
     volumes:
       - ./docker/mongodb/init-replica-set.js:/opt/oscar/init-replica-set.js:ro
@@ -91,6 +93,24 @@ services:
       ]
     networks:
       - backend
+
+  mongodb-migrate:
+    build:
+      context: .
+      target: runtime
+    restart: "no"
+    command: ["node", "dist/processes/migrate.js"]
+    environment:
+      <<: *application-environment
+      MONGODB_URI: mongodb://oscar_migrate:local-migration-password@mongodb:27017/oscar_payment_gateway?authSource=admin&replicaSet=rs0
+    depends_on:
+      mongodb-init:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    init: true
 
   redis:
     image: redis:8.2.1-bookworm
@@ -164,8 +184,8 @@ services:
       TARGET_HOST: mongodb
       TARGET_PORT: 27017
     depends_on:
-      mongodb:
-        condition: service_healthy
+      mongodb-migrate:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:27017:27017"
     networks:

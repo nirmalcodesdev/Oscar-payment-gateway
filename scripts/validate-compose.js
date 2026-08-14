@@ -16,6 +16,7 @@ assert(typeof compose === "object" && compose !== null, "Compose root must be a 
 const requiredServices = [
   "mongodb",
   "mongodb-init",
+  "mongodb-migrate",
   "redis",
   "api",
   "watcher",
@@ -68,6 +69,28 @@ for (const [serviceName, entryPoint] of Object.entries(processCommands)) {
   assert(service.init === true, `${serviceName} must use an init process`);
 }
 
+assert(
+  compose.services["mongodb-migrate"].command?.includes("dist/processes/migrate.js"),
+  "MongoDB migration service must use the dedicated migration entry point",
+);
+assert(
+  compose.services["mongodb-migrate"].restart === "no",
+  "MongoDB migration service must be one-shot",
+);
+assert(
+  compose.services["mongodb-migrate"].environment?.MONGODB_URI?.includes(
+    "oscar_migrate",
+  ) && !compose.services.api.environment?.MONGODB_URI?.includes("oscar_migrate"),
+  "Database migrations must use a credential distinct from runtime services",
+);
+for (const serviceName of Object.keys(processCommands)) {
+  assert(
+    compose.services[serviceName].depends_on?.["mongodb-migrate"]?.condition ===
+      "service_completed_successfully",
+    `${serviceName} must wait for successful database migrations`,
+  );
+}
+
 for (const serviceName of ["api-host", "mongodb-host"]) {
   assert(
     compose.services[serviceName].networks?.includes("host-access"),
@@ -91,6 +114,7 @@ for (const serviceName of [
   "api",
   "mongodb",
   "mongodb-init",
+  "mongodb-migrate",
   "watcher",
   "processor",
   "scheduler",

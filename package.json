@@ -18,6 +18,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
+    "migrate": "node --env-file-if-exists=.env dist/processes/migrate.js",
     "start:api": "node --env-file-if-exists=.env dist/processes/api.js",
     "start:watcher": "node --env-file-if-exists=.env dist/processes/watcher.js",
     "start:processor": "node --env-file-if-exists=.env dist/processes/processor.js",
