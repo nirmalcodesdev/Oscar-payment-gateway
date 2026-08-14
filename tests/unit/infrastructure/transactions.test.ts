@@ -43,4 +43,17 @@ describe("required MongoDB transactions", () => {
     expect(operation).toHaveBeenCalledTimes(1);
     expect(commitAttempts).toBe(2);
   });
+
+  it("retries an explicit MongoDB write conflict even when the label is absent", async () => {
+    const connection = transactionConnection(() => Promise.resolve());
+    const operation = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("write conflict"), { code: 112 }))
+      .mockResolvedValueOnce("committed");
+
+    await expect(withRequiredTransaction(connection, operation)).resolves.toBe(
+      "committed",
+    );
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
 });

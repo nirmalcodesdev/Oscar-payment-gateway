@@ -1,9 +1,11 @@
 import type { AddressInfo } from "node:net";
 
 import pino from "pino";
+import { Router, type Router as ExpressRouter } from "express";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/interfaces/http/create-app.js";
+import { ApplicationError } from "../../../src/domain/errors/application-error.js";
 
 const servers: ReturnType<ReturnType<typeof createApp>["listen"]>[] = [];
 
@@ -18,10 +20,17 @@ afterEach(async () => {
   );
 });
 
-async function startApp(ready: boolean): Promise<string> {
-  const app = createApp(pino({ level: "silent" }), {
-    isReady: () => Promise.resolve(ready),
-  });
+async function startApp(
+  ready: boolean,
+  apiRouters: readonly ExpressRouter[] = [],
+): Promise<string> {
+  const app = createApp(
+    pino({ level: "silent" }),
+    {
+      isReady: () => Promise.resolve(ready),
+    },
+    { apiRouters },
+  );
   const server = app.listen(0, "127.0.0.1");
   servers.push(server);
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -108,5 +117,22 @@ describe("HTTP application", () => {
     expect(response.headers.get("x-request-id")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
+  });
+
+  it("returns retry timing for rate-limited requests", async () => {
+    const router = Router();
+    router.get("/limited", (_request, _response, next) => {
+      next(
+        new ApplicationError("RATE_LIMITED", "Request rate limit exceeded", 429, {
+          retryAfterSec: 37,
+        }),
+      );
+    });
+    const baseUrl = await startApp(true, [router]);
+
+    const response = await fetch(`${baseUrl}/api/v1/limited`);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("37");
   });
 });

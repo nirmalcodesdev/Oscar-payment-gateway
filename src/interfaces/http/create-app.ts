@@ -4,6 +4,7 @@ import express, {
   type ErrorRequestHandler,
   type Express,
   type RequestHandler,
+  type Router,
 } from "express";
 import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
@@ -12,6 +13,10 @@ import { ApplicationError } from "../../domain/errors/application-error.js";
 
 export interface ReadinessProbe {
   isReady(): Promise<boolean>;
+}
+
+interface CreateAppOptions {
+  readonly apiRouters?: readonly Router[];
 }
 
 interface ErrorEnvelope {
@@ -35,7 +40,11 @@ function isMalformedJson(error: unknown): error is SyntaxError {
   return candidate.status === 400 && candidate.type === "entity.parse.failed";
 }
 
-export function createApp(logger: Logger, readiness: ReadinessProbe): Express {
+export function createApp(
+  logger: Logger,
+  readiness: ReadinessProbe,
+  options: CreateAppOptions = {},
+): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(
@@ -72,6 +81,10 @@ export function createApp(logger: Logger, readiness: ReadinessProbe): Express {
     }
   }) satisfies RequestHandler);
 
+  for (const router of options.apiRouters ?? []) {
+    app.use("/api/v1", router);
+  }
+
   app.use((_request, _response, next) => {
     next(new ApplicationError("NOT_FOUND", "Resource not found", 404));
   });
@@ -99,6 +112,15 @@ export function createApp(logger: Logger, readiness: ReadinessProbe): Express {
 
     if (applicationError === undefined) {
       request.log.error({ err: unknownError }, "Unhandled request error");
+    }
+    const retryAfterSec = applicationError?.details?.["retryAfterSec"];
+    if (
+      statusCode === 429 &&
+      typeof retryAfterSec === "number" &&
+      Number.isSafeInteger(retryAfterSec) &&
+      retryAfterSec > 0
+    ) {
+      response.setHeader("retry-after", String(retryAfterSec));
     }
     response.status(statusCode).json(envelope);
   };

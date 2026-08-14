@@ -6,6 +6,53 @@ export type ProcessName = (typeof processNames)[number];
 const integerFromEnvironment = (minimum: number, maximum: number) =>
   z.coerce.number().int().min(minimum).max(maximum);
 
+const secretFromEnvironment = z.string().trim().min(32).max(4096);
+
+const optionalSecretFromEnvironment = z
+  .string()
+  .trim()
+  .max(4096)
+  .optional()
+  .or(z.literal(""));
+
+const walletNetworkAllowlist = z
+  .string()
+  .trim()
+  .min(2)
+  .max(16_384)
+  .transform((value, context) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      context.addIssue({ code: "custom", message: "must be valid JSON" });
+      return z.NEVER;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      context.addIssue({ code: "custom", message: "must be a JSON object" });
+      return z.NEVER;
+    }
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    const result: Record<string, "mainnet" | "testnet"> = {};
+    for (const [chainId, network] of entries) {
+      if (!identifierPattern.test(chainId)) {
+        context.addIssue({ code: "custom", message: "contains an invalid chain id" });
+        return z.NEVER;
+      }
+      if (network !== "mainnet" && network !== "testnet") {
+        context.addIssue({
+          code: "custom",
+          message: "values must be mainnet or testnet",
+        });
+        return z.NEVER;
+      }
+      result[chainId] = network;
+    }
+    return result;
+  });
+
+const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
+
 const environmentSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]),
@@ -25,6 +72,15 @@ const environmentSchema = z
       .min(1)
       .max(64)
       .regex(/^[a-zA-Z0-9_-]+$/),
+    ADMIN_JWT_CURRENT_KEY_ID: z.string().trim().min(1).max(128),
+    ADMIN_JWT_CURRENT_SECRET: secretFromEnvironment,
+    ADMIN_JWT_PREVIOUS_KEY_ID: z.string().trim().max(128).optional().or(z.literal("")),
+    ADMIN_JWT_PREVIOUS_SECRET: optionalSecretFromEnvironment,
+    MERCHANT_STEP_UP_SECRET: secretFromEnvironment,
+    ADMIN_ACCESS_TTL_SEC: integerFromEnvironment(60, 900).default(600),
+    ADMIN_REFRESH_TTL_SEC: integerFromEnvironment(900, 2_592_000).default(604_800),
+    MERCHANT_STEP_UP_TTL_SEC: integerFromEnvironment(60, 900).default(300),
+    WALLET_NETWORK_ALLOWLIST: walletNetworkAllowlist,
   })
   .strict();
 
@@ -50,6 +106,17 @@ export interface RuntimeConfig {
     readonly url: string;
     readonly connectTimeoutMs: number;
     readonly queuePrefix: string;
+  };
+  readonly auth: {
+    readonly adminJwtCurrentKeyId: string;
+    readonly adminJwtCurrentSecret: string;
+    readonly adminJwtPreviousKeyId?: string;
+    readonly adminJwtPreviousSecret?: string;
+    readonly merchantStepUpSecret: string;
+    readonly adminAccessTtlSec: number;
+    readonly adminRefreshTtlSec: number;
+    readonly merchantStepUpTtlSec: number;
+    readonly walletNetworkAllowlist: Readonly<Record<string, "mainnet" | "testnet">>;
   };
 }
 
@@ -104,6 +171,19 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
 
   assertMongoReplicaSet(result.data.MONGODB_URI, result.data.MONGODB_REPLICA_SET);
   assertRedisUrl(result.data.REDIS_URL);
+  const previousKeyId =
+    result.data.ADMIN_JWT_PREVIOUS_KEY_ID === ""
+      ? undefined
+      : result.data.ADMIN_JWT_PREVIOUS_KEY_ID;
+  const previousSecret =
+    result.data.ADMIN_JWT_PREVIOUS_SECRET === ""
+      ? undefined
+      : result.data.ADMIN_JWT_PREVIOUS_SECRET;
+  if ((previousKeyId === undefined) !== (previousSecret === undefined)) {
+    throw new ConfigurationError([
+      "ADMIN_JWT_PREVIOUS_KEY_ID and ADMIN_JWT_PREVIOUS_SECRET must be configured together",
+    ]);
+  }
 
   return Object.freeze({
     nodeEnv: result.data.NODE_ENV,
@@ -120,6 +200,19 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       url: result.data.REDIS_URL,
       connectTimeoutMs: result.data.REDIS_CONNECT_TIMEOUT_MS,
       queuePrefix: result.data.QUEUE_PREFIX,
+    }),
+    auth: Object.freeze({
+      adminJwtCurrentKeyId: result.data.ADMIN_JWT_CURRENT_KEY_ID,
+      adminJwtCurrentSecret: result.data.ADMIN_JWT_CURRENT_SECRET,
+      ...(previousKeyId === undefined ? {} : { adminJwtPreviousKeyId: previousKeyId }),
+      ...(previousSecret === undefined
+        ? {}
+        : { adminJwtPreviousSecret: previousSecret }),
+      merchantStepUpSecret: result.data.MERCHANT_STEP_UP_SECRET,
+      adminAccessTtlSec: result.data.ADMIN_ACCESS_TTL_SEC,
+      adminRefreshTtlSec: result.data.ADMIN_REFRESH_TTL_SEC,
+      merchantStepUpTtlSec: result.data.MERCHANT_STEP_UP_TTL_SEC,
+      walletNetworkAllowlist: Object.freeze(result.data.WALLET_NETWORK_ALLOWLIST),
     }),
   });
 }

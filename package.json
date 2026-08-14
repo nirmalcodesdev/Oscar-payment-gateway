@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "bootstrap:admin": "node --env-file-if-exists=.env dist/processes/bootstrap-admin.js",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev:api": "tsx watch src/processes/api.ts",
     "dev:watcher": "tsx watch src/processes/watcher.ts",
@@ -33,9 +34,12 @@
     "verify:ci-negative-controls": "node scripts/verify-ci-negative-controls.js"
   },
   "dependencies": {
+    "@noble/curves": "2.3.0",
+    "@scure/bip32": "2.3.0",
     "bullmq": "5.81.3",
     "express": "5.1.0",
     "ioredis": "5.7.0",
+    "jose": "6.2.8",
     "mongoose": "8.24.3",
     "pino": "9.9.0",
     "pino-http": "10.5.0",

@@ -71,4 +71,31 @@ describe("loadConfig", () => {
       );
     }
   });
+
+  it("requires previous admin JWT key material as a complete pair", () => {
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          ADMIN_JWT_PREVIOUS_KEY_ID: "previous-v1",
+          ADMIN_JWT_PREVIOUS_SECRET: "",
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("rejects weak auth secrets and malformed wallet network policy", () => {
+    expect(() =>
+      loadConfig(validEnvironment({ ADMIN_JWT_CURRENT_SECRET: "too-short" })),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig(validEnvironment({ WALLET_NETWORK_ALLOWLIST: "[]" })),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          WALLET_NETWORK_ALLOWLIST: '{"ethereum-sepolia":"unsupported"}',
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+  });
 });

@@ -1,6 +1,6 @@
 import type { ClientSession, Connection } from "mongoose";
 
-const maximumTransactionAttempts = 5;
+const maximumTransactionAttempts = 12;
 
 export class TransactionCapabilityError extends Error {
   public constructor(message: string) {
@@ -26,7 +26,15 @@ function hasErrorLabel(error: unknown, label: string): boolean {
 }
 
 function isRetryableTransactionError(error: unknown): boolean {
-  return hasErrorLabel(error, "TransientTransactionError");
+  if (hasErrorLabel(error, "TransientTransactionError")) return true;
+  if (typeof error !== "object" || error === null) return false;
+  return Reflect.get(error, "code") === 112;
+}
+
+function retryDelay(attempt: number): Promise<void> {
+  const exponentialMs = Math.min(5 * 2 ** (attempt - 1), 100);
+  const jitterMs = Math.floor(Math.random() * 10);
+  return new Promise((resolve) => setTimeout(resolve, exponentialMs + jitterMs));
 }
 
 async function commitWithRetry(session: ClientSession): Promise<void> {
@@ -94,6 +102,7 @@ export async function withRequiredTransaction<T>(
       ) {
         throw error;
       }
+      await retryDelay(attempt);
     } finally {
       await session.endSession();
     }
