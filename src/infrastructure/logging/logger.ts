@@ -21,7 +21,7 @@ const redactionPaths = [
 
 export function createLogger(
   config: RuntimeConfig,
-  processName: ProcessName,
+  processName: ProcessName | "migrate",
   destination?: DestinationStream,
 ): Logger {
   return pino(
