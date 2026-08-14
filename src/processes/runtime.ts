@@ -9,6 +9,7 @@ import { MongoResource } from "../infrastructure/mongodb/mongo-resource.js";
 import { RedisResource } from "../infrastructure/redis/redis-resource.js";
 import { createApp } from "../interfaces/http/create-app.js";
 import { HttpServerResource } from "../interfaces/http/http-server-resource.js";
+import { createMerchantSecurityRouter } from "../interfaces/http/merchant-security-router.js";
 
 interface Runtime {
   readonly logger: Logger;
@@ -31,7 +32,14 @@ function createRuntime(processName: ProcessName): Runtime {
     };
   }
 
-  const app = createApp(logger, new ResourceReadinessProbe(dependencies, logger));
+  const merchantSecurityRouter = createMerchantSecurityRouter({
+    connection: mongo.connection,
+    redis: redis.client,
+    config,
+  });
+  const app = createApp(logger, new ResourceReadinessProbe(dependencies, logger), {
+    apiRouters: [merchantSecurityRouter],
+  });
   const httpServer = new HttpServerResource(app, config.api);
   return {
     logger,

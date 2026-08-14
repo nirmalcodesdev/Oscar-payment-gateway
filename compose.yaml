@@ -21,6 +21,15 @@ x-application: &application
     REDIS_URL: redis://redis:6379
     REDIS_CONNECT_TIMEOUT_MS: 10000
     QUEUE_PREFIX: oscar
+    ADMIN_JWT_CURRENT_KEY_ID: local-v1
+    ADMIN_JWT_CURRENT_SECRET: local-admin-jwt-secret-change-me-please-32
+    ADMIN_JWT_PREVIOUS_KEY_ID: ""
+    ADMIN_JWT_PREVIOUS_SECRET: ""
+    MERCHANT_STEP_UP_SECRET: local-merchant-step-up-secret-change-me-32
+    ADMIN_ACCESS_TTL_SEC: 600
+    ADMIN_REFRESH_TTL_SEC: 604800
+    MERCHANT_STEP_UP_TTL_SEC: 300
+    WALLET_NETWORK_ALLOWLIST: '{"ethereum-mainnet":"mainnet","ethereum-sepolia":"testnet"}'
   depends_on:
     mongodb-migrate:
       condition: service_completed_successfully

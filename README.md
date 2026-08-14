@@ -92,6 +92,20 @@ an incompatible database version and keeps automatic index creation disabled.
 See `docs/PERSISTENCE.md` for deployment, least-privilege, validation, and
 rollback procedures.
 
+## Initial administrator
+
+After migrations complete, an operator can create the first administrator with
+the one-shot `npm run bootstrap:admin` command. Inject
+`ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` only for that command;
+the password must contain at least 16 characters and must come from the
+deployment secret manager. The command stores only a salted password hash,
+does not print the password, and refuses to run after any administrator exists.
+Remove both bootstrap variables from the process environment immediately after
+the command completes.
+
+Merchant and administrator authentication, key rotation, wallet step-up, and
+the Phase 03 route contracts are documented in `docs/AUTHENTICATION.md`.
+
 ## Validation
 
 ```text

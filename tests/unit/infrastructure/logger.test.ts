@@ -32,9 +32,29 @@ describe("createLogger", () => {
       destination,
     );
 
-    logger.info({ req: { headers: { "x-oscar-merchant-api-key": "secret-key" } } });
+    logger.info({
+      req: {
+        headers: {
+          "x-oscar-merchant-api-key": "merchant-secret-key",
+          "x-oscar-wallet-step-up": "step-up-secret-token",
+        },
+      },
+      accessToken: "admin-access-secret",
+      refreshToken: "admin-refresh-secret",
+      publicExtendedKey: "wallet-public-metadata",
+      password: "admin-password-secret",
+    });
 
     expect(output).toContain("[REDACTED]");
-    expect(output).not.toContain("secret-key");
+    for (const secret of [
+      "merchant-secret-key",
+      "step-up-secret-token",
+      "admin-access-secret",
+      "admin-refresh-secret",
+      "wallet-public-metadata",
+      "admin-password-secret",
+    ]) {
+      expect(output).not.toContain(secret);
+    }
   });
 });
