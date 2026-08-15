@@ -9,8 +9,11 @@ export default defineConfig({
       reporter: ["text", "json-summary", "html"],
       include: [
         "src/config/**/*.ts",
+        "src/domain/chain/**/*.ts",
+        "src/domain/compliance/**/*.ts",
         "src/domain/errors/**/*.ts",
         "src/domain/money/**/*.ts",
+        "src/infrastructure/compliance/**/*.ts",
         "src/infrastructure/mongodb/models.ts",
         "src/infrastructure/mongodb/schema-helpers.ts",
         "src/infrastructure/mongodb/audit-service.ts",
@@ -25,6 +28,7 @@ export default defineConfig({
       exclude: [
         "src/interfaces/http/merchant-security-router.ts",
         "src/interfaces/http/admin-registry-router.ts",
+        "src/interfaces/http/payments-router.ts",
       ],
       thresholds: {
         branches: 80,

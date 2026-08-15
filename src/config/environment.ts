@@ -69,6 +69,62 @@ const rpcProviderCatalog = z
     return result;
   });
 
+const evmAddressFromList = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
+
+const sanctionsStaticList = z
+  .string()
+  .trim()
+  .min(2)
+  .max(1_048_576)
+  .transform((value, context) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      context.addIssue({ code: "custom", message: "must be valid JSON" });
+      return z.NEVER;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      context.addIssue({ code: "custom", message: "must be a JSON object" });
+      return z.NEVER;
+    }
+    const entry = parsed as Record<string, unknown>;
+    const listVersion = entry["listVersion"];
+    const addresses = entry["addresses"];
+    if (
+      Object.keys(entry).some((key) => key !== "listVersion" && key !== "addresses") ||
+      typeof listVersion !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(listVersion) ||
+      !Array.isArray(addresses) ||
+      addresses.length > 10_000
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "contains an invalid sanctions list",
+      });
+      return z.NEVER;
+    }
+    const rawAddresses: unknown[] = addresses;
+    const normalizedAddresses: string[] = [];
+    for (const address of rawAddresses) {
+      if (
+        typeof address !== "string" ||
+        !evmAddressFromList.safeParse(address).success
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "contains an invalid sanctions address",
+        });
+        return z.NEVER;
+      }
+      normalizedAddresses.push(address.toLowerCase());
+    }
+    return {
+      listVersion,
+      addresses: [...new Set(normalizedAddresses)].sort(),
+    };
+  });
+
 const walletNetworkAllowlist = z
   .string()
   .trim()
@@ -135,6 +191,13 @@ const environmentSchema = z
     WALLET_NETWORK_ALLOWLIST: walletNetworkAllowlist,
     RPC_PROVIDER_CATALOG: rpcProviderCatalog,
     RPC_REQUEST_TIMEOUT_MS: integerFromEnvironment(500, 30_000).default(5_000),
+    PAYMENT_EXPIRY_MIN_SEC: integerFromEnvironment(60, 86_400).default(300),
+    PAYMENT_EXPIRY_MAX_SEC: integerFromEnvironment(60, 86_400).default(7_200),
+    PAYMENT_EXPIRY_DEFAULT_SEC: integerFromEnvironment(60, 86_400).default(900),
+    IDEMPOTENCY_TTL_SEC: integerFromEnvironment(300, 604_800).default(86_400),
+    PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE: integerFromEnvironment(1, 1_000).default(30),
+    SANCTIONS_STATIC_LIST: sanctionsStaticList,
+    SCREENING_CACHE_TTL_SEC: integerFromEnvironment(300, 2_592_000).default(604_800),
   })
   .strict();
 
@@ -177,6 +240,20 @@ export interface RuntimeConfig {
       Record<string, { readonly operatorId: string; readonly url: string }>
     >;
     readonly requestTimeoutMs: number;
+  };
+  readonly payments: {
+    readonly expiryMinSec: number;
+    readonly expiryMaxSec: number;
+    readonly expiryDefaultSec: number;
+    readonly idempotencyTtlSec: number;
+    readonly createRateLimitPerMinute: number;
+  };
+  readonly compliance: {
+    readonly sanctionsStaticList: {
+      readonly listVersion: string;
+      readonly addresses: readonly string[];
+    };
+    readonly screeningCacheTtlSec: number;
   };
 }
 
@@ -254,6 +331,19 @@ function assertRpcProviderCatalog(
   }
 }
 
+function assertPaymentExpiry(minSec: number, maxSec: number, defaultSec: number): void {
+  if (minSec > maxSec) {
+    throw new ConfigurationError([
+      "PAYMENT_EXPIRY_MIN_SEC must not exceed PAYMENT_EXPIRY_MAX_SEC",
+    ]);
+  }
+  if (defaultSec < minSec || defaultSec > maxSec) {
+    throw new ConfigurationError([
+      "PAYMENT_EXPIRY_DEFAULT_SEC must fall within the configured expiry range",
+    ]);
+  }
+}
+
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConfig {
   const result = environmentSchema.safeParse(selectKnownEnvironment(source));
   if (!result.success) {
@@ -265,6 +355,11 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
   assertMongoReplicaSet(result.data.MONGODB_URI, result.data.MONGODB_REPLICA_SET);
   assertRedisUrl(result.data.REDIS_URL);
   assertRpcProviderCatalog(result.data.RPC_PROVIDER_CATALOG, result.data.NODE_ENV);
+  assertPaymentExpiry(
+    result.data.PAYMENT_EXPIRY_MIN_SEC,
+    result.data.PAYMENT_EXPIRY_MAX_SEC,
+    result.data.PAYMENT_EXPIRY_DEFAULT_SEC,
+  );
   const previousKeyId =
     result.data.ADMIN_JWT_PREVIOUS_KEY_ID === ""
       ? undefined
@@ -317,6 +412,20 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
         ),
       ),
       requestTimeoutMs: result.data.RPC_REQUEST_TIMEOUT_MS,
+    }),
+    payments: Object.freeze({
+      expiryMinSec: result.data.PAYMENT_EXPIRY_MIN_SEC,
+      expiryMaxSec: result.data.PAYMENT_EXPIRY_MAX_SEC,
+      expiryDefaultSec: result.data.PAYMENT_EXPIRY_DEFAULT_SEC,
+      idempotencyTtlSec: result.data.IDEMPOTENCY_TTL_SEC,
+      createRateLimitPerMinute: result.data.PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE,
+    }),
+    compliance: Object.freeze({
+      sanctionsStaticList: Object.freeze({
+        listVersion: result.data.SANCTIONS_STATIC_LIST.listVersion,
+        addresses: Object.freeze([...result.data.SANCTIONS_STATIC_LIST.addresses]),
+      }),
+      screeningCacheTtlSec: result.data.SCREENING_CACHE_TTL_SEC,
     }),
   });
 }

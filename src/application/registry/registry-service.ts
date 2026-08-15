@@ -780,6 +780,10 @@ export interface PaymentRegistrySnapshot {
   readonly tokenVerificationPolicy: VerificationPolicy;
   readonly chainConfigurationVersion: number;
   readonly tokenConfigurationVersion: number;
+  readonly networkChainId: number;
+  readonly tokenContractAddress: string;
+  readonly tokenMinAmount: string;
+  readonly tokenMaxAmount: string;
 }
 
 export class RegistrySnapshotRepository {
@@ -819,6 +823,10 @@ export class RegistrySnapshotRepository {
       tokenVerificationPolicy: token.verificationPolicy as VerificationPolicy,
       chainConfigurationVersion: chain.version,
       tokenConfigurationVersion: token.version,
+      networkChainId: chain.networkChainId,
+      tokenContractAddress: token.contractAddress,
+      tokenMinAmount: token.minAmount,
+      tokenMaxAmount: token.maxAmount,
     };
   }
 }

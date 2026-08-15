@@ -27,6 +27,14 @@ export function validEnvironment(
     RPC_PROVIDER_CATALOG:
       '{"rpc-test-a":{"operatorId":"operator-a","url":"http://127.0.0.1:18545"},"rpc-test-b":{"operatorId":"operator-b","url":"http://127.0.0.1:28545"}}',
     RPC_REQUEST_TIMEOUT_MS: "5000",
+    PAYMENT_EXPIRY_MIN_SEC: "300",
+    PAYMENT_EXPIRY_MAX_SEC: "7200",
+    PAYMENT_EXPIRY_DEFAULT_SEC: "900",
+    IDEMPOTENCY_TTL_SEC: "86400",
+    PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE: "30",
+    SANCTIONS_STATIC_LIST:
+      '{"listVersion":"test-v1","addresses":["0xD78523784b3A8e5c21D026eE7Fe405C39D1542ac"]}',
+    SCREENING_CACHE_TTL_SEC: "604800",
     ...overrides,
   };
 }

@@ -15,6 +15,7 @@ import { validateXpub } from "../../infrastructure/wallet/xpub-service.js";
 
 const defaultMerchantScopes = [
   "merchant:read",
+  "merchant:payments",
   "merchant:credentials",
   "merchant:wallets",
   "merchant:webhook",
