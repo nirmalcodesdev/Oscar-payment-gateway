@@ -30,6 +30,8 @@ x-application: &application
     ADMIN_REFRESH_TTL_SEC: 604800
     MERCHANT_STEP_UP_TTL_SEC: 300
     WALLET_NETWORK_ALLOWLIST: '{"ethereum-mainnet":"mainnet","ethereum-sepolia":"testnet"}'
+    RPC_PROVIDER_CATALOG: '{"local-rpc-a":{"operatorId":"local-operator-a","url":"http://rpc-mock-a:8545"},"local-rpc-b":{"operatorId":"local-operator-b","url":"http://rpc-mock-b:8545"},"local-rpc-wrong":{"operatorId":"local-operator-c","url":"http://rpc-mock-wrong:8545"},"local-rpc-unreachable":{"operatorId":"local-operator-d","url":"http://rpc-mock-unreachable:8545"}}'
+    RPC_REQUEST_TIMEOUT_MS: 5000
   depends_on:
     mongodb-migrate:
       condition: service_completed_successfully
@@ -43,6 +45,84 @@ x-application: &application
   stop_grace_period: 20s
 
 services:
+  rpc-mock-a:
+    build:
+      context: .
+      target: runtime
+    image: oscar-rpc-mock:local
+    command: ["node", "dist/processes/mock-rpc.js"]
+    environment:
+      RPC_MOCK_CHAIN_ID: 11155111
+    networks:
+      - backend
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8545/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rpc-mock-b:
+    image: oscar-rpc-mock:local
+    command: ["node", "dist/processes/mock-rpc.js"]
+    environment:
+      RPC_MOCK_CHAIN_ID: 11155111
+    networks:
+      - backend
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8545/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rpc-mock-wrong:
+    image: oscar-rpc-mock:local
+    command: ["node", "dist/processes/mock-rpc.js"]
+    environment:
+      RPC_MOCK_CHAIN_ID: 1
+    networks:
+      - backend
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8545/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   mongodb:
     build:
       context: ./docker/mongodb

@@ -3,6 +3,8 @@ import { z } from "zod";
 export const processNames = ["api", "watcher", "processor", "scheduler"] as const;
 export type ProcessName = (typeof processNames)[number];
 
+const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
+
 const integerFromEnvironment = (minimum: number, maximum: number) =>
   z.coerce.number().int().min(minimum).max(maximum);
 
@@ -14,6 +16,58 @@ const optionalSecretFromEnvironment = z
   .max(4096)
   .optional()
   .or(z.literal(""));
+
+const rpcProviderCatalog = z
+  .string()
+  .trim()
+  .min(2)
+  .max(65_536)
+  .transform((value, context) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      context.addIssue({ code: "custom", message: "must be valid JSON" });
+      return z.NEVER;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      context.addIssue({ code: "custom", message: "must be a JSON object" });
+      return z.NEVER;
+    }
+    const result: Record<string, { operatorId: string; url: string }> = {};
+    for (const [providerId, rawEntry] of Object.entries(parsed)) {
+      if (
+        !identifierPattern.test(providerId) ||
+        typeof rawEntry !== "object" ||
+        rawEntry === null ||
+        Array.isArray(rawEntry)
+      ) {
+        context.addIssue({ code: "custom", message: "contains an invalid provider" });
+        return z.NEVER;
+      }
+      const entry = rawEntry as Record<string, unknown>;
+      if (
+        Object.keys(entry).some((key) => key !== "operatorId" && key !== "url") ||
+        typeof entry["operatorId"] !== "string" ||
+        !identifierPattern.test(entry["operatorId"]) ||
+        typeof entry["url"] !== "string" ||
+        entry["url"].length < 1 ||
+        entry["url"].length > 2048
+      ) {
+        context.addIssue({ code: "custom", message: "contains invalid provider data" });
+        return z.NEVER;
+      }
+      result[providerId] = {
+        operatorId: entry["operatorId"],
+        url: entry["url"],
+      };
+    }
+    if (Object.keys(result).length < 2) {
+      context.addIssue({ code: "custom", message: "requires at least two providers" });
+      return z.NEVER;
+    }
+    return result;
+  });
 
 const walletNetworkAllowlist = z
   .string()
@@ -51,8 +105,6 @@ const walletNetworkAllowlist = z
     return result;
   });
 
-const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
-
 const environmentSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]),
@@ -81,6 +133,8 @@ const environmentSchema = z
     ADMIN_REFRESH_TTL_SEC: integerFromEnvironment(900, 2_592_000).default(604_800),
     MERCHANT_STEP_UP_TTL_SEC: integerFromEnvironment(60, 900).default(300),
     WALLET_NETWORK_ALLOWLIST: walletNetworkAllowlist,
+    RPC_PROVIDER_CATALOG: rpcProviderCatalog,
+    RPC_REQUEST_TIMEOUT_MS: integerFromEnvironment(500, 30_000).default(5_000),
   })
   .strict();
 
@@ -117,6 +171,12 @@ export interface RuntimeConfig {
     readonly adminRefreshTtlSec: number;
     readonly merchantStepUpTtlSec: number;
     readonly walletNetworkAllowlist: Readonly<Record<string, "mainnet" | "testnet">>;
+  };
+  readonly rpc: {
+    readonly providers: Readonly<
+      Record<string, { readonly operatorId: string; readonly url: string }>
+    >;
+    readonly requestTimeoutMs: number;
   };
 }
 
@@ -161,6 +221,39 @@ function assertRedisUrl(url: string): void {
   }
 }
 
+function assertRpcProviderCatalog(
+  catalog: Readonly<
+    Record<string, { readonly operatorId: string; readonly url: string }>
+  >,
+  nodeEnv: "development" | "test" | "production",
+): void {
+  const operators = new Set<string>();
+  for (const provider of Object.values(catalog)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(provider.url);
+    } catch {
+      throw new ConfigurationError(["RPC_PROVIDER_CATALOG contains an invalid URL"]);
+    }
+    if (
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.hash !== "" ||
+      (nodeEnv === "production"
+        ? parsed.protocol !== "https:"
+        : parsed.protocol !== "https:" && parsed.protocol !== "http:")
+    ) {
+      throw new ConfigurationError(["RPC_PROVIDER_CATALOG contains an unsafe URL"]);
+    }
+    operators.add(provider.operatorId);
+  }
+  if (operators.size < 2) {
+    throw new ConfigurationError([
+      "RPC_PROVIDER_CATALOG requires at least two independent operators",
+    ]);
+  }
+}
+
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConfig {
   const result = environmentSchema.safeParse(selectKnownEnvironment(source));
   if (!result.success) {
@@ -171,6 +264,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
 
   assertMongoReplicaSet(result.data.MONGODB_URI, result.data.MONGODB_REPLICA_SET);
   assertRedisUrl(result.data.REDIS_URL);
+  assertRpcProviderCatalog(result.data.RPC_PROVIDER_CATALOG, result.data.NODE_ENV);
   const previousKeyId =
     result.data.ADMIN_JWT_PREVIOUS_KEY_ID === ""
       ? undefined
@@ -213,6 +307,16 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       adminRefreshTtlSec: result.data.ADMIN_REFRESH_TTL_SEC,
       merchantStepUpTtlSec: result.data.MERCHANT_STEP_UP_TTL_SEC,
       walletNetworkAllowlist: Object.freeze(result.data.WALLET_NETWORK_ALLOWLIST),
+    }),
+    rpc: Object.freeze({
+      providers: Object.freeze(
+        Object.fromEntries(
+          Object.entries(result.data.RPC_PROVIDER_CATALOG).map(
+            ([providerId, provider]) => [providerId, Object.freeze(provider)],
+          ),
+        ),
+      ),
+      requestTimeoutMs: result.data.RPC_REQUEST_TIMEOUT_MS,
     }),
   });
 }

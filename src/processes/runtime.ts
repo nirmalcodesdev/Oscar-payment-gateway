@@ -8,6 +8,7 @@ import { createLogger } from "../infrastructure/logging/logger.js";
 import { MongoResource } from "../infrastructure/mongodb/mongo-resource.js";
 import { RedisResource } from "../infrastructure/redis/redis-resource.js";
 import { createApp } from "../interfaces/http/create-app.js";
+import { createAdminRegistryRouter } from "../interfaces/http/admin-registry-router.js";
 import { HttpServerResource } from "../interfaces/http/http-server-resource.js";
 import { createMerchantSecurityRouter } from "../interfaces/http/merchant-security-router.js";
 
@@ -37,8 +38,13 @@ function createRuntime(processName: ProcessName): Runtime {
     redis: redis.client,
     config,
   });
+  const adminRegistryRouter = createAdminRegistryRouter({
+    connection: mongo.connection,
+    redis: redis.client,
+    config,
+  });
   const app = createApp(logger, new ResourceReadinessProbe(dependencies, logger), {
-    apiRouters: [merchantSecurityRouter],
+    apiRouters: [merchantSecurityRouter, adminRegistryRouter],
   });
   const httpServer = new HttpServerResource(app, config.api);
   return {

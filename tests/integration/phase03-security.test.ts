@@ -56,6 +56,7 @@ describeWithServices("Phase 03 live merchant security", () => {
   let merchantA: { merchantId: string; apiKey: string; credentialId: string };
   let merchantB: { merchantId: string; apiKey: string; credentialId: string };
   let walletId = "";
+  let createdChainFixture = false;
   const paymentId = `payment_${testNamespace}`;
   const foreignPaymentId = `payment_${testNamespace}-foreign`;
   const merchantIds: string[] = [];
@@ -89,22 +90,42 @@ describeWithServices("Phase 03 live merchant security", () => {
     );
     const chain = await models.Chain.findOne({ chainId: "ethereum-sepolia" });
     if (chain === null) {
+      createdChainFixture = true;
       await models.Chain.create({
         chainId: "ethereum-sepolia",
+        networkFamily: "evm",
+        networkChainId: 11155111,
         name: "Ethereum Sepolia",
         rpcProviders: [
-          { providerId: "test-a", url: "https://rpc-a.example" },
-          { providerId: "test-b", url: "https://rpc-b.example" },
+          { providerId: "local-rpc-a", operatorId: "local-operator-a" },
+          { providerId: "local-rpc-b", operatorId: "local-operator-b" },
         ],
         nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
         requiredConfirmations: 2,
         enabled: true,
         version: 0,
+        allocationSequence: 0,
+        verifiedAt: new Date(),
       });
-    } else if (!chain.enabled) {
-      await models.Chain.updateOne(
+    } else {
+      await models.Chain.collection.updateOne(
         { chainId: "ethereum-sepolia" },
-        { $set: { enabled: true } },
+        {
+          $set: {
+            networkFamily: "evm",
+            networkChainId: 11155111,
+            name: "Ethereum Sepolia",
+            rpcProviders: [
+              { providerId: "local-rpc-a", operatorId: "local-operator-a" },
+              { providerId: "local-rpc-b", operatorId: "local-operator-b" },
+            ],
+            nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+            requiredConfirmations: 2,
+            enabled: true,
+            allocationSequence: 0,
+            verifiedAt: new Date(),
+          },
+        },
       );
     }
   });
@@ -126,6 +147,9 @@ describeWithServices("Phase 03 live merchant security", () => {
     await models.Payment.collection.deleteMany({
       paymentId: { $in: [paymentId, foreignPaymentId] },
     });
+    if (createdChainFixture) {
+      await models.Chain.collection.deleteOne({ chainId: "ethereum-sepolia" });
+    }
     const scopes = merchantIds.map((merchantId) => `merchant_${merchantId}`);
     await models.AuditLog.collection.deleteMany({ scope: { $in: scopes } });
     await models.AuditChainHead.collection.deleteMany({ scope: { $in: scopes } });

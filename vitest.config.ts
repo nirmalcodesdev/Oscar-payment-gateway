@@ -20,9 +20,12 @@ export default defineConfig({
         "src/infrastructure/logging/**/*.ts",
         "src/interfaces/http/**/*.ts",
       ],
-      // This router is exercised against the live Compose API process by the
-      // Phase 03 integration suite, outside Vitest's instrumented process.
-      exclude: ["src/interfaces/http/merchant-security-router.ts"],
+      // These routers are exercised against the live Compose API process by
+      // their integration suites, outside Vitest's instrumented process.
+      exclude: [
+        "src/interfaces/http/merchant-security-router.ts",
+        "src/interfaces/http/admin-registry-router.ts",
+      ],
       thresholds: {
         branches: 80,
         functions: 80,
