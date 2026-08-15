@@ -128,4 +128,75 @@ describe("loadConfig", () => {
       ),
     ).toThrow(ConfigurationError);
   });
+
+  it("loads payment and compliance configuration", () => {
+    const config = loadConfig(validEnvironment());
+
+    expect(config.payments.expiryMinSec).toBe(300);
+    expect(config.payments.expiryMaxSec).toBe(7200);
+    expect(config.payments.expiryDefaultSec).toBe(900);
+    expect(config.payments.idempotencyTtlSec).toBe(86400);
+    expect(config.payments.createRateLimitPerMinute).toBe(30);
+    expect(config.compliance.sanctionsStaticList.listVersion).toBe("test-v1");
+    expect(config.compliance.sanctionsStaticList.addresses).toEqual([
+      "0xd78523784b3a8e5c21d026ee7fe405c39d1542ac",
+    ]);
+    expect(config.compliance.screeningCacheTtlSec).toBe(604800);
+    expect(Object.isFrozen(config.payments)).toBe(true);
+    expect(Object.isFrozen(config.compliance.sanctionsStaticList)).toBe(true);
+  });
+
+  it("rejects inconsistent payment expiry configuration", () => {
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          PAYMENT_EXPIRY_MIN_SEC: "7200",
+          PAYMENT_EXPIRY_MAX_SEC: "300",
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          PAYMENT_EXPIRY_MIN_SEC: "300",
+          PAYMENT_EXPIRY_MAX_SEC: "7200",
+          PAYMENT_EXPIRY_DEFAULT_SEC: "60",
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("requires an explicit sanctions static list", () => {
+    expect(() =>
+      loadConfig(validEnvironment({ SANCTIONS_STATIC_LIST: undefined })),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("rejects malformed sanctions static lists", () => {
+    for (const list of [
+      "not-json",
+      "[]",
+      '{"listVersion":"v1"}',
+      '{"listVersion":"v1","addresses":"0x1111111111111111111111111111111111111111"}',
+      '{"listVersion":"","addresses":[]}',
+      '{"listVersion":"v1","addresses":["not-an-address"]}',
+      '{"listVersion":"v1","addresses":[],"extra":true}',
+    ]) {
+      expect(() =>
+        loadConfig(validEnvironment({ SANCTIONS_STATIC_LIST: list })),
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  it("normalizes and de-duplicates sanctions addresses", () => {
+    const config = loadConfig(
+      validEnvironment({
+        SANCTIONS_STATIC_LIST:
+          '{"listVersion":"v2","addresses":["0xAbCdEf0123456789abcdef0123456789ABCDEF01","0xabcdef0123456789abcdef0123456789abcdef01"]}',
+      }),
+    );
+    expect(config.compliance.sanctionsStaticList.addresses).toEqual([
+      "0xabcdef0123456789abcdef0123456789abcdef01",
+    ]);
+  });
 });

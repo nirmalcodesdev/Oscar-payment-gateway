@@ -18,31 +18,58 @@ function expectedVersions(network: WalletNetwork) {
   return network === "mainnet" ? mainnetVersions : testnetVersions;
 }
 
-export function validateXpub(
-  value: string,
-  expectedNetwork: WalletNetwork,
-): ValidatedXpub {
+function parsePublicOnlyKey(value: string, network: WalletNetwork): HDKey {
   if (!/^(?:xpub|tpub)[1-9A-HJ-NP-Za-km-z]{80,120}$/.test(value)) {
     throw new Error("Wallet public key format is invalid");
   }
   let key: HDKey;
   try {
-    key = HDKey.fromExtendedKey(value, expectedVersions(expectedNetwork));
+    key = HDKey.fromExtendedKey(value, expectedVersions(network));
   } catch {
     throw new Error("Wallet public key checksum or network is invalid");
   }
   if (key.privateKey !== null || key.publicKey === null) {
     throw new Error("Wallet public key is not public-only");
   }
+  return key;
+}
+
+function childAddress(key: HDKey, index: number): Address {
   let child: HDKey;
   try {
-    child = key.deriveChild(0);
+    child = key.deriveChild(index);
   } catch {
     throw new Error("Wallet public key cannot derive a receiving child");
   }
   if (child.publicKey === null) throw new Error("Wallet child public key is missing");
   const uncompressed = secp256k1.Point.fromBytes(child.publicKey).toBytes(false);
-  const sampleAddress = publicKeyToAddress(bytesToHex(uncompressed));
+  return publicKeyToAddress(bytesToHex(uncompressed));
+}
+
+export function validateXpub(
+  value: string,
+  expectedNetwork: WalletNetwork,
+): ValidatedXpub {
+  const key = parsePublicOnlyKey(value, expectedNetwork);
+  const sampleAddress = childAddress(key, 0);
   const fingerprint = key.fingerprint.toString(16).padStart(8, "0");
   return { network: expectedNetwork, fingerprint, sampleAddress };
+}
+
+export const maximumDerivationIndex = 2_147_483_647;
+
+export function deriveReceivingAddress(
+  publicExtendedKey: string,
+  network: WalletNetwork,
+  derivationIndex: number,
+): Address {
+  if (
+    !Number.isSafeInteger(derivationIndex) ||
+    derivationIndex < 0 ||
+    derivationIndex > maximumDerivationIndex
+  ) {
+    throw new Error("Derivation index is outside the public-only range");
+  }
+  const key = parsePublicOnlyKey(publicExtendedKey, network);
+  return childAddress(key, derivationIndex);
 }

@@ -32,6 +32,13 @@ x-application: &application
     WALLET_NETWORK_ALLOWLIST: '{"ethereum-mainnet":"mainnet","ethereum-sepolia":"testnet"}'
     RPC_PROVIDER_CATALOG: '{"local-rpc-a":{"operatorId":"local-operator-a","url":"http://rpc-mock-a:8545"},"local-rpc-b":{"operatorId":"local-operator-b","url":"http://rpc-mock-b:8545"},"local-rpc-wrong":{"operatorId":"local-operator-c","url":"http://rpc-mock-wrong:8545"},"local-rpc-unreachable":{"operatorId":"local-operator-d","url":"http://rpc-mock-unreachable:8545"}}'
     RPC_REQUEST_TIMEOUT_MS: 5000
+    PAYMENT_EXPIRY_MIN_SEC: 300
+    PAYMENT_EXPIRY_MAX_SEC: 7200
+    PAYMENT_EXPIRY_DEFAULT_SEC: 900
+    IDEMPOTENCY_TTL_SEC: 86400
+    PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE: 60
+    SANCTIONS_STATIC_LIST: '{"listVersion":"local-test-v1","addresses":["0xD78523784b3A8e5c21D026eE7Fe405C39D1542ac"]}'
+    SCREENING_CACHE_TTL_SEC: 604800
   depends_on:
     mongodb-migrate:
       condition: service_completed_successfully

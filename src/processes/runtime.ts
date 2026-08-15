@@ -11,6 +11,7 @@ import { createApp } from "../interfaces/http/create-app.js";
 import { createAdminRegistryRouter } from "../interfaces/http/admin-registry-router.js";
 import { HttpServerResource } from "../interfaces/http/http-server-resource.js";
 import { createMerchantSecurityRouter } from "../interfaces/http/merchant-security-router.js";
+import { createPaymentsRouter } from "../interfaces/http/payments-router.js";
 
 interface Runtime {
   readonly logger: Logger;
@@ -43,8 +44,14 @@ function createRuntime(processName: ProcessName): Runtime {
     redis: redis.client,
     config,
   });
+  const paymentsRouter = createPaymentsRouter({
+    connection: mongo.connection,
+    redis: redis.client,
+    config,
+    logger,
+  });
   const app = createApp(logger, new ResourceReadinessProbe(dependencies, logger), {
-    apiRouters: [merchantSecurityRouter, adminRegistryRouter],
+    apiRouters: [merchantSecurityRouter, adminRegistryRouter, paymentsRouter],
   });
   const httpServer = new HttpServerResource(app, config.api);
   return {
