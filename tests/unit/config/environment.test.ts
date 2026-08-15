@@ -11,6 +11,8 @@ describe("loadConfig", () => {
     expect(config.redis.queuePrefix).toBe("oscar-test");
     expect(Object.isFrozen(config)).toBe(true);
     expect(Object.isFrozen(config.mongodb)).toBe(true);
+    expect(Object.isFrozen(config.rpc.providers)).toBe(true);
+    expect(config.rpc.providers["rpc-test-a"]?.operatorId).toBe("operator-a");
   });
 
   it("rejects missing required values without echoing secret values", () => {
@@ -94,6 +96,34 @@ describe("loadConfig", () => {
       loadConfig(
         validEnvironment({
           WALLET_NETWORK_ALLOWLIST: '{"ethereum-sepolia":"unsupported"}',
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("rejects unsafe or non-independent RPC provider catalogs", () => {
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          RPC_PROVIDER_CATALOG:
+            '{"rpc-a":{"operatorId":"same-operator","url":"http://127.0.0.1:1"},"rpc-b":{"operatorId":"same-operator","url":"http://127.0.0.1:2"}}',
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          NODE_ENV: "production",
+          RPC_PROVIDER_CATALOG:
+            '{"rpc-a":{"operatorId":"operator-a","url":"http://rpc-a.example"},"rpc-b":{"operatorId":"operator-b","url":"https://rpc-b.example"}}',
+        }),
+      ),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig(
+        validEnvironment({
+          RPC_PROVIDER_CATALOG:
+            '{"rpc-a":{"operatorId":"operator-a","url":"http://user:password@rpc-a.example"},"rpc-b":{"operatorId":"operator-b","url":"https://rpc-b.example"}}',
         }),
       ),
     ).toThrow(ConfigurationError);

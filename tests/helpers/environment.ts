@@ -24,6 +24,9 @@ export function validEnvironment(
     MERCHANT_STEP_UP_TTL_SEC: "300",
     WALLET_NETWORK_ALLOWLIST:
       '{"ethereum-mainnet":"mainnet","ethereum-sepolia":"testnet"}',
+    RPC_PROVIDER_CATALOG:
+      '{"rpc-test-a":{"operatorId":"operator-a","url":"http://127.0.0.1:18545"},"rpc-test-b":{"operatorId":"operator-b","url":"http://127.0.0.1:28545"}}',
+    RPC_REQUEST_TIMEOUT_MS: "5000",
     ...overrides,
   };
 }

@@ -200,6 +200,11 @@ export const paymentSchema = new Schema(
     status: { type: String, required: true, enum: paymentStatuses, default: "pending" },
     version: { ...boundedCounter, default: 0 },
     requiredConfirmations: { ...immutableBoundedCounter, min: 1 },
+    tokenVerificationPolicy: {
+      type: String,
+      enum: ["event_only", "balance_delta_required"],
+      immutable: true,
+    },
     confirmations: { ...boundedCounter, default: 0 },
     screeningStatus: {
       type: String,
@@ -240,7 +245,7 @@ rejectDeletes(paymentSchema, "Payment");
 const rpcProviderSchema = new Schema(
   {
     providerId: requiredIdentifier,
-    url: { type: String, required: true, maxlength: 2048, select: false },
+    operatorId: requiredIdentifier,
   },
   { _id: false, ...strictSchemaOptions },
 );
@@ -257,6 +262,19 @@ const nativeCurrencySchema = new Schema(
 export const chainSchema = new Schema(
   {
     chainId: immutableIdentifier,
+    networkFamily: {
+      type: String,
+      required: true,
+      enum: ["evm"],
+      immutable: true,
+    },
+    networkChainId: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: Number.MAX_SAFE_INTEGER,
+      immutable: true,
+    },
     name: { type: String, required: true, trim: true, maxlength: 128 },
     rpcProviders: {
       type: [rpcProviderSchema],
@@ -267,6 +285,7 @@ export const chainSchema = new Schema(
     requiredConfirmations: { ...boundedCounter, min: 1 },
     enabled: { type: Boolean, required: true, default: false },
     version: { ...boundedCounter, default: 0 },
+    allocationSequence: { ...boundedCounter, default: 0 },
     verifiedAt: { type: Date },
   },
   { ...timestampOptions, collection: "chains" },
@@ -291,6 +310,11 @@ export const tokenSchema = new Schema(
     decimals: { type: Number, required: true, min: 0, max: 255 },
     minAmount: requiredPositiveAmount,
     maxAmount: requiredPositiveAmount,
+    verificationPolicy: {
+      type: String,
+      required: true,
+      enum: ["event_only", "balance_delta_required"],
+    },
     enabled: { type: Boolean, required: true, default: false },
     verificationStatus: {
       type: String,
@@ -299,7 +323,11 @@ export const tokenSchema = new Schema(
       default: "unverified",
     },
     version: { ...boundedCounter, default: 0 },
+    allocationSequence: { ...boundedCounter, default: 0 },
     verifiedAt: { type: Date },
+    verifiedSymbol: { type: String, trim: true, uppercase: true, maxlength: 32 },
+    verifiedDecimals: { type: Number, min: 0, max: 255 },
+    verifiedTotalSupply: optionalNonNegativeAmount,
   },
   { ...timestampOptions, collection: "tokens" },
 );

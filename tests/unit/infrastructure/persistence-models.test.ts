@@ -20,6 +20,7 @@ const validPayment = {
   status: "pending",
   version: 0,
   requiredConfirmations: 12,
+  tokenVerificationPolicy: "event_only",
   confirmations: 0,
   screeningStatus: "pending",
   expiresAt: new Date("2030-01-01T00:00:00.000Z"),
@@ -121,6 +122,7 @@ describe("persistence model contracts", () => {
       "amount",
       "expiresAt",
       "requiredConfirmations",
+      "tokenVerificationPolicy",
     ]) {
       expect(modelDefinitions.Payment.path(path).options["immutable"]).toBe(true);
     }
@@ -148,6 +150,51 @@ describe("persistence model contracts", () => {
     ]) {
       expect(modelDefinitions.WalletAddress.path(path).options["immutable"]).toBe(true);
     }
+  });
+
+  it("requires verified registry identity, policy, and allocation guards", async () => {
+    const chain = new models.Chain({
+      chainId: "ethereum-sepolia",
+      networkFamily: "evm",
+      networkChainId: 11155111,
+      name: "Ethereum Sepolia",
+      rpcProviders: [
+        { providerId: "rpc-a", operatorId: "operator-a" },
+        { providerId: "rpc-b", operatorId: "operator-b" },
+      ],
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      requiredConfirmations: 2,
+      enabled: false,
+      version: 0,
+      allocationSequence: 0,
+    });
+    await expect(chain.validate()).resolves.toBeUndefined();
+    expect(modelDefinitions.Chain.path("networkChainId").options["immutable"]).toBe(
+      true,
+    );
+
+    const token = new models.Token({
+      tokenId: "usdc-sepolia",
+      chain: "ethereum-sepolia",
+      symbol: "USDC",
+      contractAddress: "0x1111111111111111111111111111111111111111",
+      normalizedContractAddress: "0x1111111111111111111111111111111111111111",
+      decimals: 6,
+      minAmount: "1",
+      maxAmount: "1000000",
+      verificationPolicy: "balance_delta_required",
+      enabled: false,
+      verificationStatus: "unverified",
+      version: 0,
+      allocationSequence: 0,
+    });
+    await expect(token.validate()).resolves.toBeUndefined();
+    await expect(
+      new models.Token({
+        ...token.toObject(),
+        verificationPolicy: "trust_event_without_review",
+      }).validate(),
+    ).rejects.toThrow();
   });
 
   it("declares every correctness-critical unique and query index", () => {

@@ -106,6 +106,16 @@ the command completes.
 Merchant and administrator authentication, key rotation, wallet step-up, and
 the Phase 03 route contracts are documented in `docs/AUTHENTICATION.md`.
 
+## Chain and token registry
+
+Phase 04 adds the admin-only, audited chain and ERC-20 registry. Entries are
+created disabled and activated only after live verification through the
+operator-configured `RPC_PROVIDER_CATALOG`; administrators submit provider IDs,
+never RPC URLs. Configure at least two providers operated independently for
+each chain. The registry never stores or returns endpoint credentials. See
+`docs/REGISTRY.md` for lifecycle, manual-review, deactivation, and migration
+procedures.
+
 ## Validation
 
 ```text
