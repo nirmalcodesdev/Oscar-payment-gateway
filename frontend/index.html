@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Oscar Gateway Dev Console</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Oscar Gateway <span>Dev Console</span></h1>
+      <div id="connection">
+        <label
+          >API base
+          <input id="api-base" value="http://127.0.0.1:3000" />
+        </label>
+        <span id="conn-state" class="pill">unknown</span>
+      </div>
+    </header>
+    <div id="layout">
+      <nav id="nav">
+        <button data-section="dashboard" class="active">Dashboard</button>
+        <button data-section="admin">Admin Session</button>
+        <button data-section="merchants">Merchants (Admin)</button>
+        <button data-section="chains">Chains (Admin)</button>
+        <button data-section="tokens">Tokens (Admin)</button>
+        <button data-section="compliance">Compliance (Admin)</button>
+        <button data-section="reconciliation">Reconciliation</button>
+        <button data-section="merchant">Merchant Session</button>
+        <button data-section="payments">Payments</button>
+        <button data-section="ingestion">Ingestion Tester</button>
+        <button data-section="webhook">Webhook Verifier</button>
+      </nav>
+      <main id="main"></main>
+    </div>
+    <section id="console-wrap">
+      <div id="console-head">
+        <button id="console-toggle">Console</button>
+        <button id="console-clear">Clear</button>
+        <span id="console-count"></span>
+      </div>
+      <div id="console" hidden></div>
+    </section>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

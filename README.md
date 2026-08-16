@@ -271,3 +271,27 @@ evidence; real-funds production use remains blocked until the human release
 gates in `docs/RELEASE_SIGNOFF.md` (qualified legal/compliance review,
 operator release approval, public-testnet verification, independent
 threat-model review, and a live alert paging test) are recorded.
+
+## Dev console (browser UI)
+
+A dependency-free browser console exercises every API surface — useful for
+local testing without curl:
+
+```bash
+docker compose up -d   # API on 127.0.0.1:3000 (with the console origin allowlisted)
+npm run dev:frontend   # serves the console on http://127.0.0.1:4050
+```
+
+Sections cover the full surface: health/readiness/metrics probes, admin
+session (login/refresh/logout), merchant onboarding and lifecycle, chain
+and token registry administration (including force paths), compliance
+(sanctions-list ingest with client-side canonical hashing, holds, review
+decisions), reconciliation (overview, annotation resolution, webhook
+replay), merchant session (API key, step-up, credential rotation, webhook
+URL, wallet registration/rotation), payment creation with idempotency and
+status polling, a signed internal-ingestion tester (WebCrypto HMAC over
+timestamp/nonce/body exactly like the watcher), and a webhook signature
+verifier mirroring the receiver contract. Every call is logged to the
+request console with status and latency. Tokens/keys are kept only in the
+browser's localStorage; the console is a development tool and ships no
+production build of its own.

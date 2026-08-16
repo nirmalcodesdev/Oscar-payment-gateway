@@ -1,0 +1,296 @@
+:root {
+  --bg: #0f1216;
+  --panel: #171b21;
+  --panel2: #1e242c;
+  --line: #2a323d;
+  --text: #dce3ea;
+  --dim: #8b98a5;
+  --accent: #4da3ff;
+  --ok: #3fbf7f;
+  --warn: #e0b341;
+  --err: #e06c5f;
+  --mono: ui-monospace, "Cascadia Code", monospace;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+header h1 {
+  font-size: 17px;
+  margin: 0;
+}
+header h1 span {
+  color: var(--accent);
+  font-weight: 400;
+}
+#connection {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+#connection input {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  width: 220px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.pill {
+  padding: 2px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+}
+.pill.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.pill.err {
+  color: var(--err);
+  border-color: var(--err);
+}
+#layout {
+  display: flex;
+  min-height: calc(100vh - 130px);
+}
+#nav {
+  width: 200px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 10px 0;
+  display: flex;
+  flex-direction: column;
+}
+#nav button {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--dim);
+  padding: 9px 18px;
+  cursor: pointer;
+  font-size: 13px;
+  border-left: 2px solid transparent;
+}
+#nav button:hover {
+  color: var(--text);
+}
+#nav button.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--panel2);
+}
+#main {
+  flex: 1;
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+section.view h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+section.view p.hint {
+  color: var(--dim);
+  font-size: 12px;
+  margin: 0 0 14px;
+}
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+}
+legend {
+  color: var(--accent);
+  font-size: 12px;
+  padding: 0 6px;
+}
+label.f {
+  display: block;
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+label.f input,
+label.f textarea,
+label.f select {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+label.f textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.row > label.f {
+  flex: 1;
+  min-width: 160px;
+}
+button.act {
+  background: var(--accent);
+  color: #06121f;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+  margin: 8px 4px 0 0;
+}
+button.act.secondary {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+button.act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+pre.out {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+}
+pre.out.empty {
+  display: none;
+}
+table.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 10px;
+}
+table.tbl th,
+table.tbl td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+table.tbl th {
+  color: var(--dim);
+  font-weight: 500;
+}
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+}
+.badge.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.badge.err {
+  color: var(--err);
+  border-color: var(--err);
+}
+.badge.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.copy {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 11px;
+  user-select: none;
+}
+#console-wrap {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+#console-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 12px;
+}
+#console-head button {
+  background: var(--panel2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 11px;
+}
+#console-count {
+  color: var(--dim);
+  font-size: 11px;
+}
+#console {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 12px 10px;
+}
+#console .entry {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--panel2);
+}
+#console .m {
+  color: var(--accent);
+}
+#console .s2 {
+  color: var(--ok);
+}
+#console .s4,
+#console .s5 {
+  color: var(--err);
+}
+#console .t {
+  color: var(--dim);
+  float: right;
+}
+.muted {
+  color: var(--dim);
+  font-size: 12px;
+}
+.warnbox {
+  color: var(--warn);
+  font-size: 12px;
+}

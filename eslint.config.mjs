@@ -26,6 +26,40 @@ export default tseslint.config(
     },
   },
   {
+    // Node dev-tool scripts: node globals, no type-checking.
+    files: ["scripts/**/*.mjs", "scripts/*.js"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        URL: "readonly",
+        console: "readonly",
+      },
+    },
+  },
+  {
+    // Browser dev console: browser globals, no type-checking.
+    files: ["frontend/**/*.js"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        localStorage: "readonly",
+        performance: "readonly",
+        crypto: "readonly",
+        fetch: "readonly",
+        prompt: "readonly",
+        TextEncoder: "readonly",
+        URL: "readonly",
+        Node: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        setTimeout: "readonly",
+      },
+    },
+    rules: {
+      "no-unused-vars": "off",
+    },
+  },
+  {
     files: ["**/*.ts"],
     languageOptions: {
       parserOptions: {
