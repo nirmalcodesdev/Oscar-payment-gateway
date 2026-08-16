@@ -149,3 +149,120 @@ On PowerShell systems that block `npm.ps1`, run the same commands with
 No open-source license has been granted. The repository is currently marked
 `UNLICENSED`; all rights are reserved until the owner records a different
 license decision.
+
+## Architecture overview
+
+Clean-architecture layering with dependencies pointing inward:
+
+```
+src/domain         Pure contracts: state machines, chain ports, money,
+                   screening, error envelopes
+src/application    Services: payment creation, matching, confirmation,
+                   ingestion/interpretation, compliance, scheduling,
+                   reconciliation, webhooks
+src/infrastructure MongoDB (replica-set transactions, hash-chained audit),
+                   viem RPC clients, BullMQ/Redis queues and locks,
+                   scrypt/HMAC/JWT auth, SSRF-hardened HTTP clients,
+                   metrics, trace propagation
+src/interfaces/http Express app + routers (merchant, admin, compliance,
+                   reconciliation, internal ingestion)
+src/processes      Four entry points: api, watcher, processor, scheduler
+```
+
+Key invariants: MongoDB is the correctness boundary (unique event claims,
+conditional versioned transitions, transactional webhook outbox); Redis is
+delivery coordination only; all money is base-unit integer strings with
+`bigint` arithmetic; everything ambiguous fails closed. See `docs/adr/` for
+the binding decisions.
+
+## Setup (development)
+
+Requires Node 24, Docker, and the Compose stack (MongoDB replica set +
+Redis + mock RPC providers):
+
+```bash
+npm ci
+docker compose up -d --build     # starts every service + migrations
+docker compose ps                # wait for api (healthy)
+curl http://127.0.0.1:3000/ready # {"status":"ready",...}
+```
+
+Bootstrap the initial admin identity (one-time; prints credentials once):
+
+```bash
+npm run build && npm run bootstrap:admin
+```
+
+**Replica set requirement**: every environment that resembles production
+must run MongoDB as a replica set — multi-document transactions silently
+fail to provide their guarantees against a standalone mongod. The Compose
+stack configures `rs0` automatically.
+
+## Process operation
+
+| Operation                 | Command                                                               |
+| ------------------------- | --------------------------------------------------------------------- |
+| Start one process (dev)   | `npm run dev:api` / `dev:watcher` / `dev:processor` / `dev:scheduler` |
+| Start one process (built) | `npm run start:api` ...                                               |
+| Run migrations            | `npm run build && npm run migrate`                                    |
+| Graceful shutdown         | `docker compose stop <service>` (30s drain window)                    |
+| Scale processors          | safe at any replica count (exactly-once by design)                    |
+| Liveness / readiness      | `GET /health` (process) / `GET /ready` (dependencies + chains)        |
+| Metrics                   | `GET /metrics` (Prometheus text)                                      |
+
+Rolling restarts are safe: cursor-based watching resumes from the last
+processed block; in-flight jobs retry; scheduler leases prevent overlap.
+
+## API usage (merchant)
+
+1. Onboard via admin approval; register a wallet xpub (public keys only).
+2. Create payments: `POST /api/v1/payments` with merchant API key
+   (`x-oscar-merchant-api-key`), optional `Idempotency-Key`; the response
+   carries the deposit address, EIP-681 URI, and expiry.
+3. Poll `GET /api/v1/payments/:paymentId` (merchant:read) for status,
+   capped confirmations, and partial/overpayment fields.
+4. Receive signed webhooks for matched/confirmed/expired/failed.
+
+## Webhook verification and idempotency
+
+Every delivery is signed with HMAC-SHA256 over
+`${timestamp}\n${deliveryId}\n` + exact body bytes using the platform's
+versioned key. Verify headers `x-oscar-webhook-key-id`,
+`x-oscar-webhook-timestamp` (reject stale), `x-oscar-delivery-id`,
+`x-oscar-webhook-signature`. Delivery is **at-least-once**: deduplicate on
+`deliveryId`, derive ordering from the payload's `paymentVersion`, and
+treat `(paymentId, eventType)` as the logical key. Failed deliveries retry
+with jittered backoff, then dead-letter (merchant-visible via support).
+
+## Testing commands
+
+```bash
+npm run validate       # format + lint + typecheck + unit + build + compose/entrypoint gates
+npm run test:coverage  # unit coverage thresholds
+MONGODB_INTEGRATION_URI="mongodb://oscar_app:local-app-password@127.0.0.1:27017/oscar_payment_gateway?authSource=admin&replicaSet=rs0&directConnection=true" \
+PHASE03_API_URL="http://127.0.0.1:3000" \
+npm run test:integration   # full live suite (requires the Compose stack)
+npm run verify:ci-negative-controls
+```
+
+## Operations and security documentation
+
+- `SECURITY.md` — secret inventory, trust boundaries, custody model,
+  incident reporting.
+- `COMPLIANCE.md` — regulatory framing (not legal advice).
+- `docs/runbooks/` — RPC outage, deep reorg, backlogs, compliance holds,
+  secret rotation, webhook DLQ, allocation exhaustion, data restoration
+  (RPO/RTO), tenant leak, double-credit, incident response.
+- `docs/alerting/prometheus-rules.yaml` — alert definitions.
+- `docs/PRE_LAUNCH_CHECKLIST.md` — verbatim release gate.
+- `deploy/docker-compose.production.example.yaml` — production topology
+  template.
+
+## Limitations and v1 exclusions
+
+Single EVM family; no sweeps/refunds/signing (future HSM/MPC component);
+screening is the fail-closed static-list fallback plus admin-managed lists
+(integrate a real provider before real funds); webhook egress requires the
+documented SSRF controls; fiat rails, tax reporting, and custody are out of
+scope. This software is not production-ready until Phases 11–12 and the
+pre-launch checklist complete with evidence.
