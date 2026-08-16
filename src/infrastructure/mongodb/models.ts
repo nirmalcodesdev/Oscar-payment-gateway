@@ -212,6 +212,10 @@ export const paymentSchema = new Schema(
       enum: ["clear", "flagged", "blocked", "pending"],
       default: "pending",
     },
+    // Deep-reorg automation hold (ADR 0012): set only by a finality incident;
+    // cleared only by an audited manual disposition.
+    automationHold: { type: Boolean, default: false },
+    automationHoldReorgId: { type: String, match: identifierPattern },
     matchedEventId: { type: String, match: identifierPattern },
     transactionHash: { type: String, match: transactionHashPattern },
     expiresAt: immutableDate,
@@ -397,9 +401,8 @@ onChainEventSchema.index(
 onChainEventSchema.index(
   { matchedPaymentId: 1 },
   {
-    unique: true,
     partialFilterExpression: { matchedPaymentId: { $type: "string" } },
-    name: "uq_event_payment_claim",
+    name: "ix_event_payment_claim",
   },
 );
 onChainEventSchema.index(

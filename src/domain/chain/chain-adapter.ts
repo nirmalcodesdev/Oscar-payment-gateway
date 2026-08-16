@@ -129,6 +129,17 @@ export interface ChainCursorStorage {
     readonly lastProcessedBlockHash: string;
     readonly headers: readonly ObservedBlockHeader[];
   }): Promise<void>;
+  /**
+   * Rewind the cursor to a resolved fork point after reorg resolution
+   * (ADR 0012). Conditional on the stored version so only one watcher
+   * instance's resolution wins; returns false when another instance moved
+   * the cursor first.
+   */
+  rewind(input: {
+    readonly expectedVersion: number;
+    readonly lastProcessedBlock: number;
+    readonly lastProcessedBlockHash: string;
+  }): Promise<boolean>;
 }
 
 /**

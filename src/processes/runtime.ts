@@ -1,12 +1,16 @@
 import type { Logger } from "pino";
 
 import { EventInterpretationService } from "../application/ingestion/event-interpretation-service.js";
+import { PaymentMatchingService } from "../application/processing/payment-matching-service.js";
+import { PaymentConfirmationService } from "../application/processing/payment-confirmation-service.js";
 import { loadConfig, type ProcessName } from "../config/environment.js";
 import { EvmBalanceDeltaReader } from "../infrastructure/chain/evm-balance-delta-reader.js";
+import { EvmConfirmationReader } from "../infrastructure/chain/evm-confirmation-reader.js";
 import {
   resolveChainProviderClients,
   type ResolvedProviderClient,
 } from "../infrastructure/chain/evm-chain-adapter.js";
+import { StaticSanctionsListProvider } from "../infrastructure/compliance/static-list-provider.js";
 import { EnabledRegistryReader } from "../application/registry/registry-reader.js";
 import { LifecycleManager } from "../infrastructure/lifecycle/lifecycle-manager.js";
 import type { ManagedResource } from "../infrastructure/lifecycle/managed-resource.js";
@@ -14,8 +18,13 @@ import { ResourceReadinessProbe } from "../infrastructure/lifecycle/readiness-pr
 import { WatcherResource } from "../infrastructure/lifecycle/watcher-resource.js";
 import { createLogger } from "../infrastructure/logging/logger.js";
 import { MongoResource } from "../infrastructure/mongodb/mongo-resource.js";
+import {
+  PaymentConfirmationQueue,
+  PaymentConfirmationWorkerResource,
+} from "../infrastructure/queue/payment-confirmation-queue.js";
 import { EventQueueResource } from "../infrastructure/queue/event-queue.js";
 import { EventInterpretationWorkerResource } from "../infrastructure/queue/event-worker.js";
+import { PaymentLock } from "../infrastructure/redis/payment-lock.js";
 import { RedisResource } from "../infrastructure/redis/redis-resource.js";
 import { createApp } from "../interfaces/http/create-app.js";
 import { createAdminRegistryRouter } from "../interfaces/http/admin-registry-router.js";
@@ -61,12 +70,22 @@ function createRuntime(processName: ProcessName): Runtime {
   if (processName === "processor") {
     const registryReader = new EnabledRegistryReader(mongo.connection);
     const balanceDeltas = new EvmBalanceDeltaReader(new Map(), logger);
+    const confirmationReader = new EvmConfirmationReader(new Map(), logger);
     const providerSync = new BalanceDeltaProviderSync({
       config,
-      reader: balanceDeltas,
+      readers: [balanceDeltas, confirmationReader],
       registryReader,
       logger,
       refreshSec: config.watcher.registryRefreshSec,
+    });
+    const confirmationQueue = new PaymentConfirmationQueue(
+      redis.client,
+      config.redis.queuePrefix,
+      config.processing.confirmationPollIntervalMs,
+    );
+    const matching = new PaymentMatchingService(mongo.connection, config, {
+      lock: new PaymentLock(redis.client, config.redis.queuePrefix),
+      confirmations: confirmationQueue,
     });
     const worker = new EventInterpretationWorkerResource({
       redis: redis.client,
@@ -77,10 +96,26 @@ function createRuntime(processName: ProcessName): Runtime {
         registryReader,
       ),
       logger,
+      matching,
+    });
+    const confirmationWorker = new PaymentConfirmationWorkerResource({
+      redis: redis.client,
+      queuePrefix: config.redis.queuePrefix,
+      pollIntervalMs: config.processing.confirmationPollIntervalMs,
+      service: new PaymentConfirmationService(mongo.connection, config, {
+        reader: confirmationReader,
+        screening: new StaticSanctionsListProvider(
+          config.compliance.sanctionsStaticList,
+        ),
+      }),
+      logger,
     });
     return {
       logger,
-      lifecycle: new LifecycleManager([...dependencies, providerSync, worker], logger),
+      lifecycle: new LifecycleManager(
+        [...dependencies, providerSync, worker, confirmationWorker],
+        logger,
+      ),
       shutdownTimeoutMs: config.shutdownTimeoutMs,
     };
   }
@@ -124,15 +159,19 @@ function createRuntime(processName: ProcessName): Runtime {
 }
 
 /**
- * Keeps the processor's corroborated balance-delta providers in sync with the
- * enabled registry on a bounded interval (ADR 0010). Provider configuration
+ * Keeps the processor's corroborated chain readers in sync with the enabled
+ * registry on a bounded interval (ADR 0010/0012). Provider configuration
  * failures degrade individual chains to "unavailable" reads (review outcome)
  * rather than failing processor startup.
  */
 class BalanceDeltaProviderSync implements ManagedResource {
   public readonly name = "balance-delta-provider-sync";
   readonly #config: ReturnType<typeof loadConfig>;
-  readonly #reader: EvmBalanceDeltaReader;
+  readonly #readers: {
+    setProvidersByChain(
+      providers: ReadonlyMap<string, readonly ResolvedProviderClient[]>,
+    ): void;
+  }[];
   readonly #registryReader: EnabledRegistryReader;
   readonly #logger: Logger;
   readonly #refreshSec: number;
@@ -141,13 +180,17 @@ class BalanceDeltaProviderSync implements ManagedResource {
 
   public constructor(options: {
     readonly config: ReturnType<typeof loadConfig>;
-    readonly reader: EvmBalanceDeltaReader;
+    readonly readers: {
+      setProvidersByChain(
+        providers: ReadonlyMap<string, readonly ResolvedProviderClient[]>,
+      ): void;
+    }[];
     readonly registryReader: EnabledRegistryReader;
     readonly logger: Logger;
     readonly refreshSec: number;
   }) {
     this.#config = options.config;
-    this.#reader = options.reader;
+    this.#readers = options.readers;
     this.#registryReader = options.registryReader;
     this.#logger = options.logger.child({ component: "balance-delta-provider-sync" });
     this.#refreshSec = options.refreshSec;
@@ -158,7 +201,7 @@ class BalanceDeltaProviderSync implements ManagedResource {
     this.#timer = setInterval(() => {
       this.#inFlight ??= this.#sync()
         .catch((error: unknown) => {
-          this.#logger.warn({ err: error }, "Balance-delta provider sync failed");
+          this.#logger.warn({ err: error }, "Chain reader provider sync failed");
         })
         .finally(() => {
           this.#inFlight = undefined;
@@ -199,11 +242,13 @@ class BalanceDeltaProviderSync implements ManagedResource {
       } catch (error: unknown) {
         this.#logger.warn(
           { err: error, chainId: chain.chainId },
-          "Balance-delta providers unresolved; chain reads will be unavailable",
+          "Chain reader providers unresolved; chain reads will be unavailable",
         );
       }
     }
-    this.#reader.setProvidersByChain(providersByChain);
+    for (const reader of this.#readers) {
+      reader.setProvidersByChain(providersByChain);
+    }
   }
 }
 

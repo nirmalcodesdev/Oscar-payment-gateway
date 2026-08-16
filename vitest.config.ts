@@ -13,6 +13,7 @@ export default defineConfig({
         "src/domain/compliance/**/*.ts",
         "src/domain/errors/**/*.ts",
         "src/domain/money/**/*.ts",
+        "src/domain/payments/**/*.ts",
         "src/infrastructure/compliance/**/*.ts",
         "src/infrastructure/mongodb/models.ts",
         "src/infrastructure/mongodb/schema-helpers.ts",

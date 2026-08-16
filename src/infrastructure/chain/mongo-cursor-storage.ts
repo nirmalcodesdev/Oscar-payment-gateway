@@ -116,11 +116,40 @@ export class MongoChainCursorStorage implements ChainCursorStorage {
   }
 
   /**
+   * Rewind to a resolved fork point (ADR 0012). The observed block record for
+   * the fork point already exists from the original pass; only the cursor
+   * position and hash move, conditional on the stored version.
+   */
+  public async rewind(input: {
+    readonly expectedVersion: number;
+    readonly lastProcessedBlock: number;
+    readonly lastProcessedBlockHash: string;
+  }): Promise<boolean> {
+    return withRequiredTransaction(this.#connection, async (session) => {
+      const updated = await this.#models.ChainCursor.updateOne(
+        { chain: this.#chain, version: input.expectedVersion },
+        {
+          $set: {
+            lastProcessedBlock: input.lastProcessedBlock,
+            lastProcessedBlockHash: input.lastProcessedBlockHash,
+            updatedAt: new Date(),
+          },
+          $inc: { version: 1 },
+        },
+        { session },
+      );
+      return updated.modifiedCount === 1;
+    });
+  }
+
+  /**
    * Split headers into genuinely new blocks and ones already persisted. A
-   * height already observed with the same hash is a benign duplicate delivery
-   * of a previously committed batch; the same height with a different hash is
-   * a fork at that height, so the chain must halt before building on
-   * inconsistent history (Phase 07 resolves forks).
+   * canonical height already observed with the same hash is a benign
+   * duplicate delivery of a previously committed batch; the same height with
+   * a different hash is a fork at that height, so the chain must halt before
+   * building on inconsistent history. Records already flagged non-canonical
+   * by reorg resolution never conflict: replacement blocks legitimately carry
+   * different hashes at those heights.
    */
   async #classifyObservedBlocks(
     headers: readonly ObservedBlockHeader[],
@@ -129,6 +158,7 @@ export class MongoChainCursorStorage implements ChainCursorStorage {
     const existing = await this.#models.ObservedBlock.find({
       chain: this.#chain,
       blockNumber: { $in: headers.map((header) => header.blockNumber) },
+      canonical: true,
     }).lean();
     const newHeaders: ObservedBlockHeader[] = [];
     for (const header of headers) {

@@ -215,7 +215,7 @@ describeWithMongo("Phase 06 event ingestion and interpretation", () => {
     models = registerPersistenceModels(connection);
 
     await requireDatabase(connection).collection("migration_leases").deleteMany({});
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(3);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(4);
     for (const model of Object.values(models)) {
       await model.collection.deleteMany({});
     }
@@ -300,12 +300,12 @@ describeWithMongo("Phase 06 event ingestion and interpretation", () => {
   });
 
   describe("schema migration 0003", () => {
-    it("is idempotent and settles the database at version 3", async () => {
-      await expect(runDatabaseMigrations(connection)).resolves.toBe(3);
+    it("is idempotent and settles the database at version 4", async () => {
+      await expect(runDatabaseMigrations(connection)).resolves.toBe(4);
       const metadata = await requireDatabase(connection)
         .collection<{ _id: string; version: number }>("schema_metadata")
         .findOne({ _id: "current" });
-      expect(metadata?.version).toBe(3);
+      expect(metadata?.version).toBe(4);
     });
   });
 

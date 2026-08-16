@@ -95,7 +95,7 @@ describeWithMongo("Phase 02 persistence invariants", () => {
   });
 
   it("installs the migration exactly once and accepts the supported database version", async () => {
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(3);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(4);
     await expect(assertDatabaseCompatibility(connection)).resolves.toBeUndefined();
     const metadata = await requireDatabase(connection)
       .collection<{
@@ -104,8 +104,8 @@ describeWithMongo("Phase 02 persistence invariants", () => {
         migrations: unknown[];
       }>("schema_metadata")
       .findOne({ _id: "current" });
-    expect(metadata?.version).toBe(3);
-    expect(metadata?.migrations).toHaveLength(3);
+    expect(metadata?.version).toBe(4);
+    expect(metadata?.migrations).toHaveLength(4);
   });
 
   it("refuses an incompatible database schema version", async () => {
@@ -117,7 +117,7 @@ describeWithMongo("Phase 02 persistence invariants", () => {
     await expect(assertDatabaseCompatibility(connection)).rejects.toBeInstanceOf(
       DatabaseCompatibilityError,
     );
-    await metadata.updateOne({ _id: "current" }, { $set: { version: 3 } });
+    await metadata.updateOne({ _id: "current" }, { $set: { version: 4 } });
   });
 
   it("refuses a concurrent migration lease", async () => {
@@ -175,7 +175,7 @@ describeWithMongo("Phase 02 persistence invariants", () => {
     await expect(models.OnChainEvent.countDocuments()).resolves.toBe(1);
   });
 
-  it("allows one on-chain event to claim a payment globally", async () => {
+  it("lets a payment accumulate claims from many events, one claim per event", async () => {
     await models.OnChainEvent.collection.deleteMany({});
     expect(
       await fulfilledCount([
@@ -185,11 +185,23 @@ describeWithMongo("Phase 02 persistence invariants", () => {
         models.OnChainEvent.create(
           eventFixture("event_claim_b", transactionB, "payment_claimed"),
         ),
+        models.OnChainEvent.create(
+          eventFixture("event_claim_c", `0x${"c".repeat(64)}`, "payment_claimed"),
+        ),
       ]),
-    ).toBe(1);
+    ).toBe(3);
     await expect(
       models.OnChainEvent.countDocuments({ matchedPaymentId: "payment_claimed" }),
-    ).resolves.toBe(1);
+    ).resolves.toBe(3);
+    // The claim field is a single scalar: structurally, an event can name at
+    // most one payment, and only conditional writes may populate it.
+    const claims = await models.OnChainEvent.find(
+      { matchedPaymentId: "payment_claimed" },
+      { matchedPaymentId: 1 },
+    ).lean();
+    for (const claim of claims) {
+      expect(claim.matchedPaymentId).toBe("payment_claimed");
+    }
   });
 
   it("atomically rejects duplicate derivation indexes and payment assignments", async () => {
