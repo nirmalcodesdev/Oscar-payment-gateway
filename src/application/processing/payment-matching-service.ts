@@ -6,6 +6,10 @@ import type { Logger } from "pino";
 import type { RuntimeConfig } from "../../config/environment.js";
 import { evaluatePaymentTransition } from "../../domain/payments/payment-state-machine.js";
 import {
+  WebhookOutboxWriter,
+  type WebhookDispatcher,
+} from "../webhooks/webhook-outbox.js";
+import {
   appendAuditEntry,
   appendAuditEntryInTransaction,
 } from "../../infrastructure/mongodb/audit-service.js";
@@ -31,6 +35,7 @@ export interface MatchOutcome {
 /** Internal match result carrying follow-up work for after the commit. */
 type ClaimOutcome = MatchOutcome & {
   readonly postTransaction?: () => Promise<void>;
+  readonly deliveryIds?: readonly string[];
 };
 
 export interface PaymentConfirmationEnqueuer {
@@ -127,6 +132,8 @@ export class PaymentMatchingService {
   readonly #config: RuntimeConfig;
   readonly #lock: PaymentLock | undefined;
   readonly #confirmations: PaymentConfirmationEnqueuer | undefined;
+  readonly #outbox: WebhookOutboxWriter | undefined;
+  readonly #dispatcher: WebhookDispatcher | undefined;
 
   public constructor(
     connection: Connection,
@@ -134,6 +141,7 @@ export class PaymentMatchingService {
     options: {
       readonly lock?: PaymentLock;
       readonly confirmations?: PaymentConfirmationEnqueuer;
+      readonly webhookDispatcher?: WebhookDispatcher;
     } = {},
   ) {
     this.#connection = connection;
@@ -141,6 +149,11 @@ export class PaymentMatchingService {
     this.#config = config;
     this.#lock = options.lock;
     this.#confirmations = options.confirmations;
+    this.#outbox =
+      options.webhookDispatcher === undefined
+        ? undefined
+        : new WebhookOutboxWriter(connection);
+    this.#dispatcher = options.webhookDispatcher;
   }
 
   public async matchEvent(eventId: string, logger: Logger): Promise<MatchOutcome> {
@@ -221,6 +234,11 @@ export class PaymentMatchingService {
     }
     if (outcome.postTransaction !== undefined) {
       await outcome.postTransaction();
+    }
+    if (outcome.deliveryIds !== undefined && this.#dispatcher !== undefined) {
+      for (const deliveryId of outcome.deliveryIds) {
+        await this.#dispatcher.enqueueWebhookDelivery(deliveryId);
+      }
     }
     return outcome;
   }
@@ -380,10 +398,31 @@ export class PaymentMatchingService {
           },
           session,
         );
+        let matchedDeliveryId: string | undefined;
+        if (this.#outbox !== undefined) {
+          matchedDeliveryId = await this.#outbox.writeInTransaction(
+            session,
+            WebhookOutboxWriter.payloadFor(
+              {
+                ...payment,
+                status: "matched",
+                amountReceived: baseUnit(cumulative),
+                partialAmountReceived: baseUnit(cumulative),
+                ...(excess === 0n ? {} : { excessAmount: baseUnit(excess) }),
+                transactionHash: event.transactionHash,
+              },
+              "payment.matched",
+              now,
+            ),
+          );
+        }
         return {
           eventId: event.eventId,
           action: "claimed_matched",
           paymentId,
+          ...(matchedDeliveryId === undefined
+            ? {}
+            : { deliveryIds: [matchedDeliveryId] }),
           ...(excess === 0n
             ? {}
             : {
@@ -421,6 +460,7 @@ export class PaymentMatchingService {
       0n,
     );
     const qualifying = total >= BigInt(payment.amount);
+    let expiredDeliveryId: string | undefined;
     const evaluation = evaluatePaymentTransition({
       from: "pending",
       to: "expired",
@@ -466,11 +506,26 @@ export class PaymentMatchingService {
         },
         session,
       );
+      if (this.#outbox !== undefined) {
+        expiredDeliveryId = await this.#outbox.writeInTransaction(
+          session,
+          WebhookOutboxWriter.payloadFor(
+            {
+              ...payment,
+              status: "expired",
+              partialAmountReceived: baseUnit(total),
+            },
+            "payment.expired",
+            now,
+          ),
+        );
+      }
     }
     return {
       eventId: event.eventId,
       action: "late_arrival_annotated",
       paymentId: payment.paymentId,
+      ...(expiredDeliveryId === undefined ? {} : { deliveryIds: [expiredDeliveryId] }),
       postTransaction: async () => {
         if (total > 0n && total < BigInt(payment.amount)) {
           await this.#annotate(

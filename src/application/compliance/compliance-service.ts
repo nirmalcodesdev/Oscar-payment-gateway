@@ -184,7 +184,7 @@ export class ComplianceService {
     });
 
     this.#provider?.invalidate();
-    const rescreened = await this.#rescreenHeldPayments();
+    const rescreened = await this.rescreenHeldPayments();
     return {
       listId,
       listVersion: input.listVersion,
@@ -305,7 +305,7 @@ export class ComplianceService {
    * or unavailable results keep the hold. Payment version conflicts are
    * skipped — the next confirmation attempt re-evaluates.
    */
-  async #rescreenHeldPayments(): Promise<{ cleared: number; stillHeld: number }> {
+  public async rescreenHeldPayments(): Promise<{ cleared: number; stillHeld: number }> {
     if (this.#provider === undefined) return { cleared: 0, stillHeld: 0 };
     const held = await this.#models.Payment.find({
       status: { $in: ["pending", "matched", "confirming"] },

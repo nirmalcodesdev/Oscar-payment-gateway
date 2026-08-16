@@ -31,6 +31,8 @@ export default defineConfig({
         "src/interfaces/http/admin-registry-router.ts",
         "src/interfaces/http/payments-router.ts",
         "src/interfaces/http/internal-events-router.ts",
+        "src/interfaces/http/compliance-router.ts",
+        "src/interfaces/http/reconciliation-router.ts",
       ],
       thresholds: {
         branches: 80,
