@@ -10,6 +10,10 @@ import {
   evaluatePaymentTransition,
   type PaymentStatus,
 } from "../../domain/payments/payment-state-machine.js";
+import {
+  WebhookOutboxWriter,
+  type WebhookDispatcher,
+} from "../webhooks/webhook-outbox.js";
 import { appendAuditEntryInTransaction } from "../../infrastructure/mongodb/audit-service.js";
 import { registerPersistenceModels } from "../../infrastructure/mongodb/models.js";
 import { withRequiredTransaction } from "../../infrastructure/mongodb/transactions.js";
@@ -57,6 +61,7 @@ interface PaymentDocument {
   readonly paymentId: string;
   readonly merchantId: string;
   readonly chain: string;
+  readonly token: string;
   readonly amount: string;
   readonly status: string;
   readonly version: number;
@@ -66,6 +71,8 @@ interface PaymentDocument {
   readonly matchedEventId?: string;
   readonly screeningStatus: string;
   readonly automationHold?: boolean;
+  readonly transactionHash?: string;
+  readonly amountReceived?: string;
 }
 
 /**
@@ -83,6 +90,8 @@ export class PaymentConfirmationService {
   readonly #latestReviewDecision:
     | ((paymentId: string) => Promise<"release" | "block" | undefined>)
     | undefined;
+  readonly #outbox: WebhookOutboxWriter | undefined;
+  readonly #dispatcher: WebhookDispatcher | undefined;
 
   public constructor(
     connection: Connection,
@@ -93,6 +102,7 @@ export class PaymentConfirmationService {
       readonly latestReviewDecision?: (
         paymentId: string,
       ) => Promise<"release" | "block" | undefined>;
+      readonly webhookDispatcher?: WebhookDispatcher;
     },
   ) {
     this.#connection = connection;
@@ -101,6 +111,11 @@ export class PaymentConfirmationService {
     this.#reader = dependencies.reader;
     this.#screening = dependencies.screening;
     this.#latestReviewDecision = dependencies.latestReviewDecision;
+    this.#outbox =
+      dependencies.webhookDispatcher === undefined
+        ? undefined
+        : new WebhookOutboxWriter(connection);
+    this.#dispatcher = dependencies.webhookDispatcher;
   }
 
   public async advancePayment(
@@ -371,6 +386,10 @@ export class PaymentConfirmationService {
     action = `payment_${to}`,
   ): Promise<boolean> {
     const from = payment.status as PaymentStatus;
+    // Only merchant-facing terminal transitions emit webhooks (ADR 0014);
+    // internal hold representations never notify.
+    const emitsWebhook = to === "confirmed" || to === "failed";
+    let deliveryId: string | undefined;
     const applied = await withRequiredTransaction(
       this.#connection,
       async (session): Promise<boolean> => {
@@ -402,6 +421,23 @@ export class PaymentConfirmationService {
           },
           session,
         );
+        if (updated !== null && emitsWebhook && this.#outbox !== undefined) {
+          const amountReceived = setFields["amountReceived"];
+          const transactionHash = setFields["transactionHash"];
+          deliveryId = await this.#outbox.writeInTransaction(
+            session,
+            WebhookOutboxWriter.payloadFor(
+              {
+                ...payment,
+                status: to,
+                ...(typeof amountReceived === "string" ? { amountReceived } : {}),
+                ...(typeof transactionHash === "string" ? { transactionHash } : {}),
+              },
+              to === "confirmed" ? "payment.confirmed" : "payment.failed",
+              new Date(),
+            ),
+          );
+        }
         return updated !== null;
       },
     );
@@ -410,8 +446,12 @@ export class PaymentConfirmationService {
         { paymentId: payment.paymentId, from, to },
         "Stale confirmation transition collapsed to an auditable no-op",
       );
+      return false;
     }
-    return applied;
+    if (deliveryId !== undefined && this.#dispatcher !== undefined) {
+      await this.#dispatcher.enqueueWebhookDelivery(deliveryId);
+    }
+    return true;
   }
 
   async #recordRejection(

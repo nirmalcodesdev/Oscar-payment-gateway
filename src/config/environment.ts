@@ -222,6 +222,27 @@ const environmentSchema = z
     SANCTIONS_STATIC_LIST: sanctionsStaticList,
     SCREENING_CACHE_TTL_SEC: integerFromEnvironment(300, 2_592_000).default(604_800),
     SCREENING_LIST_MAX_AGE_SEC: integerFromEnvironment(60, 31_536_000).default(604_800),
+    WEBHOOK_HMAC_CURRENT_KEY_ID: z.string().trim().min(1).max(128),
+    WEBHOOK_HMAC_CURRENT_SECRET: secretFromEnvironment,
+    WEBHOOK_HMAC_PREVIOUS_KEY_ID: z
+      .string()
+      .trim()
+      .max(128)
+      .optional()
+      .or(z.literal("")),
+    WEBHOOK_HMAC_PREVIOUS_SECRET: optionalSecretFromEnvironment,
+    WEBHOOK_DELIVERY_TIMEOUT_MS: integerFromEnvironment(500, 60_000).default(10_000),
+    WEBHOOK_MAX_ATTEMPTS: integerFromEnvironment(1, 20).default(8),
+    WEBHOOK_RETENTION_SEC: integerFromEnvironment(3_600, 2_592_000).default(604_800),
+    SCHEDULER_LEASE_TTL_SEC: integerFromEnvironment(10, 600).default(60),
+    SCHEDULER_EXPIRY_SWEEP_SEC: integerFromEnvironment(5, 3_600).default(30),
+    SCHEDULER_CONFIRMATION_RECHECK_SEC: integerFromEnvironment(10, 3_600).default(60),
+    SCHEDULER_STUCK_PAYMENT_SEC: integerFromEnvironment(60, 86_400).default(300),
+    SCHEDULER_SCREENING_RECHECK_SEC: integerFromEnvironment(60, 86_400).default(300),
+    SCHEDULER_REGISTRY_REFRESH_SEC: integerFromEnvironment(10, 3_600).default(60),
+    SCHEDULER_WEBHOOK_SWEEP_SEC: integerFromEnvironment(5, 3_600).default(30),
+    SCHEDULER_RETENTION_SEC: integerFromEnvironment(300, 86_400).default(3_600),
+    STUCK_PAYMENT_THRESHOLD_SEC: integerFromEnvironment(60, 86_400).default(1_800),
   })
   .strict();
 
@@ -292,6 +313,26 @@ export interface RuntimeConfig {
     readonly latePaymentGraceSec: number;
     readonly confirmationPollIntervalMs: number;
     readonly reorgMaxScanBlocks: number;
+  };
+  readonly webhooks: {
+    readonly hmacCurrentKeyId: string;
+    readonly hmacCurrentSecret: string;
+    readonly hmacPreviousKeyId?: string;
+    readonly hmacPreviousSecret?: string;
+    readonly deliveryTimeoutMs: number;
+    readonly maxAttempts: number;
+    readonly retentionSec: number;
+  };
+  readonly scheduler: {
+    readonly leaseTtlSec: number;
+    readonly expirySweepSec: number;
+    readonly confirmationRecheckSec: number;
+    readonly stuckPaymentSec: number;
+    readonly screeningRecheckSec: number;
+    readonly registryRefreshSec: number;
+    readonly webhookSweepSec: number;
+    readonly retentionSec: number;
+    readonly stuckPaymentThresholdSec: number;
   };
   readonly compliance: {
     readonly sanctionsStaticList: {
@@ -455,6 +496,31 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       "INGESTION_NONCE_TTL_SEC must cover at least twice the timestamp skew window",
     ]);
   }
+  const webhookPreviousKeyId =
+    result.data.WEBHOOK_HMAC_PREVIOUS_KEY_ID === ""
+      ? undefined
+      : result.data.WEBHOOK_HMAC_PREVIOUS_KEY_ID;
+  const webhookPreviousSecret =
+    result.data.WEBHOOK_HMAC_PREVIOUS_SECRET === ""
+      ? undefined
+      : result.data.WEBHOOK_HMAC_PREVIOUS_SECRET;
+  if ((webhookPreviousKeyId === undefined) !== (webhookPreviousSecret === undefined)) {
+    throw new ConfigurationError([
+      "WEBHOOK_HMAC_PREVIOUS_KEY_ID and WEBHOOK_HMAC_PREVIOUS_SECRET must be configured together",
+    ]);
+  }
+  if (webhookPreviousKeyId !== undefined) {
+    if (webhookPreviousKeyId === result.data.WEBHOOK_HMAC_CURRENT_KEY_ID) {
+      throw new ConfigurationError([
+        "WEBHOOK_HMAC_PREVIOUS_KEY_ID must differ from WEBHOOK_HMAC_CURRENT_KEY_ID",
+      ]);
+    }
+    if (webhookPreviousSecret === result.data.WEBHOOK_HMAC_CURRENT_SECRET) {
+      throw new ConfigurationError([
+        "WEBHOOK_HMAC_PREVIOUS_SECRET must differ from WEBHOOK_HMAC_CURRENT_SECRET",
+      ]);
+    }
+  }
 
   return Object.freeze({
     nodeEnv: result.data.NODE_ENV,
@@ -526,6 +592,30 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       latePaymentGraceSec: result.data.LATE_PAYMENT_GRACE_SEC,
       confirmationPollIntervalMs: result.data.CONFIRMATION_POLL_INTERVAL_MS,
       reorgMaxScanBlocks: result.data.REORG_MAX_SCAN_BLOCKS,
+    }),
+    webhooks: Object.freeze({
+      hmacCurrentKeyId: result.data.WEBHOOK_HMAC_CURRENT_KEY_ID,
+      hmacCurrentSecret: result.data.WEBHOOK_HMAC_CURRENT_SECRET,
+      ...(webhookPreviousKeyId === undefined
+        ? {}
+        : { hmacPreviousKeyId: webhookPreviousKeyId }),
+      ...(webhookPreviousSecret === undefined
+        ? {}
+        : { hmacPreviousSecret: webhookPreviousSecret }),
+      deliveryTimeoutMs: result.data.WEBHOOK_DELIVERY_TIMEOUT_MS,
+      maxAttempts: result.data.WEBHOOK_MAX_ATTEMPTS,
+      retentionSec: result.data.WEBHOOK_RETENTION_SEC,
+    }),
+    scheduler: Object.freeze({
+      leaseTtlSec: result.data.SCHEDULER_LEASE_TTL_SEC,
+      expirySweepSec: result.data.SCHEDULER_EXPIRY_SWEEP_SEC,
+      confirmationRecheckSec: result.data.SCHEDULER_CONFIRMATION_RECHECK_SEC,
+      stuckPaymentSec: result.data.SCHEDULER_STUCK_PAYMENT_SEC,
+      screeningRecheckSec: result.data.SCHEDULER_SCREENING_RECHECK_SEC,
+      registryRefreshSec: result.data.SCHEDULER_REGISTRY_REFRESH_SEC,
+      webhookSweepSec: result.data.SCHEDULER_WEBHOOK_SWEEP_SEC,
+      retentionSec: result.data.SCHEDULER_RETENTION_SEC,
+      stuckPaymentThresholdSec: result.data.STUCK_PAYMENT_THRESHOLD_SEC,
     }),
     compliance: Object.freeze({
       sanctionsStaticList: Object.freeze({

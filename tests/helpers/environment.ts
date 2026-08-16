@@ -43,6 +43,10 @@ export function validEnvironment(
     WATCHER_BATCH_SIZE: "10",
     WATCHER_REGISTRY_REFRESH_SEC: "30",
     WATCHER_INITIAL_LOOKBACK_BLOCKS: "0",
+    WEBHOOK_HMAC_CURRENT_KEY_ID: "test-webhook-v1",
+    WEBHOOK_HMAC_CURRENT_SECRET: "test-webhook-hmac-secret-32-bytes-ok!!",
+    WEBHOOK_HMAC_PREVIOUS_KEY_ID: "",
+    WEBHOOK_HMAC_PREVIOUS_SECRET: "",
     SANCTIONS_STATIC_LIST:
       '{"listVersion":"test-v1","addresses":["0xD78523784b3A8e5c21D026eE7Fe405C39D1542ac"]}',
     SCREENING_CACHE_TTL_SEC: "604800",

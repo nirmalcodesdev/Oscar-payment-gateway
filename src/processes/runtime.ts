@@ -5,6 +5,7 @@ import { ScreeningService } from "../application/compliance/screening-service.js
 import { EventInterpretationService } from "../application/ingestion/event-interpretation-service.js";
 import { PaymentMatchingService } from "../application/processing/payment-matching-service.js";
 import { PaymentConfirmationService } from "../application/processing/payment-confirmation-service.js";
+import { SchedulerService } from "../application/scheduler/scheduler-service.js";
 import { loadConfig, type ProcessName } from "../config/environment.js";
 import { EvmBalanceDeltaReader } from "../infrastructure/chain/evm-balance-delta-reader.js";
 import { EvmConfirmationReader } from "../infrastructure/chain/evm-confirmation-reader.js";
@@ -26,11 +27,17 @@ import {
 } from "../infrastructure/queue/payment-confirmation-queue.js";
 import { EventQueueResource } from "../infrastructure/queue/event-queue.js";
 import { EventInterpretationWorkerResource } from "../infrastructure/queue/event-worker.js";
+import {
+  WebhookDeliveryQueue,
+  WebhookDeliveryWorkerResource,
+} from "../infrastructure/queue/webhook-delivery-queue.js";
+import { JobLease } from "../infrastructure/redis/job-lease.js";
 import { PaymentLock } from "../infrastructure/redis/payment-lock.js";
 import { RedisResource } from "../infrastructure/redis/redis-resource.js";
 import { createApp } from "../interfaces/http/create-app.js";
 import { createAdminRegistryRouter } from "../interfaces/http/admin-registry-router.js";
 import { createComplianceRouter } from "../interfaces/http/compliance-router.js";
+import { createReconciliationRouter } from "../interfaces/http/reconciliation-router.js";
 import { HttpServerResource } from "../interfaces/http/http-server-resource.js";
 import { createInternalEventsRouter } from "../interfaces/http/internal-events-router.js";
 import { createMerchantSecurityRouter } from "../interfaces/http/merchant-security-router.js";
@@ -50,9 +57,55 @@ function createRuntime(processName: ProcessName): Runtime {
   const dependencies: ManagedResource[] = [mongo, redis];
 
   if (processName === "scheduler") {
+    const webhookQueue = new WebhookDeliveryQueue(
+      redis.client,
+      config.redis.queuePrefix,
+      config.webhooks.maxAttempts,
+    );
+    const confirmationQueue = new PaymentConfirmationQueue(
+      redis.client,
+      config.redis.queuePrefix,
+      config.processing.confirmationPollIntervalMs,
+    );
+    const sanctionsProvider = new UpdateableSanctionsListProvider(
+      mongo.connection,
+      config.compliance,
+      logger,
+    );
+    const scheduler = new SchedulerService(
+      mongo.connection,
+      config,
+      new JobLease(
+        redis.client,
+        config.redis.queuePrefix,
+        config.scheduler.leaseTtlSec,
+      ),
+      logger,
+      { confirmations: confirmationQueue, webhookDispatcher: webhookQueue },
+    );
+    scheduler.bindScreeningRecheck(async () => {
+      const compliance = new ComplianceService(
+        mongo.connection,
+        logger,
+        sanctionsProvider,
+      );
+      const result = await compliance.rescreenHeldPayments();
+      return result.cleared + result.stillHeld;
+    });
     return {
       logger,
-      lifecycle: new LifecycleManager(dependencies, logger),
+      lifecycle: new LifecycleManager(
+        [
+          ...dependencies,
+          {
+            name: "scheduler-jobs",
+            start: () => Promise.resolve(scheduler.start()),
+            stop: () => Promise.resolve(scheduler.stop()),
+            isReady: () => Promise.resolve(true),
+          } satisfies ManagedResource,
+        ],
+        logger,
+      ),
       shutdownTimeoutMs: config.shutdownTimeoutMs,
     };
   }
@@ -86,9 +139,15 @@ function createRuntime(processName: ProcessName): Runtime {
       config.redis.queuePrefix,
       config.processing.confirmationPollIntervalMs,
     );
+    const webhookQueue = new WebhookDeliveryQueue(
+      redis.client,
+      config.redis.queuePrefix,
+      config.webhooks.maxAttempts,
+    );
     const matching = new PaymentMatchingService(mongo.connection, config, {
       lock: new PaymentLock(redis.client, config.redis.queuePrefix),
       confirmations: confirmationQueue,
+      webhookDispatcher: webhookQueue,
     });
     const worker = new EventInterpretationWorkerResource({
       redis: redis.client,
@@ -119,13 +178,20 @@ function createRuntime(processName: ProcessName): Runtime {
         ),
         latestReviewDecision: (paymentId) =>
           new ComplianceService(mongo.connection, logger).latestDecision(paymentId),
+        webhookDispatcher: webhookQueue,
       }),
+      logger,
+    });
+    const webhookWorker = new WebhookDeliveryWorkerResource({
+      redis: redis.client,
+      connection: mongo.connection,
+      config,
       logger,
     });
     return {
       logger,
       lifecycle: new LifecycleManager(
-        [...dependencies, providerSync, worker, confirmationWorker],
+        [...dependencies, providerSync, worker, confirmationWorker, webhookWorker],
         logger,
       ),
       shutdownTimeoutMs: config.shutdownTimeoutMs,
@@ -166,6 +232,18 @@ function createRuntime(processName: ProcessName): Runtime {
     logger,
     sanctionsProvider,
   });
+  const webhookDispatchQueue = new WebhookDeliveryQueue(
+    redis.client,
+    config.redis.queuePrefix,
+    config.webhooks.maxAttempts,
+  );
+  const reconciliationRouter = createReconciliationRouter({
+    connection: mongo.connection,
+    redis: redis.client,
+    config,
+    logger,
+    webhookDispatcher: webhookDispatchQueue,
+  });
   const eventQueue = new EventQueueResource(redis.client, config.redis.queuePrefix);
   const internalEventsRouter = createInternalEventsRouter({
     connection: mongo.connection,
@@ -178,6 +256,7 @@ function createRuntime(processName: ProcessName): Runtime {
       adminRegistryRouter,
       paymentsRouter,
       complianceRouter,
+      reconciliationRouter,
       internalEventsRouter,
     ],
   });
