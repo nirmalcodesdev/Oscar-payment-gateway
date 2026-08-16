@@ -6,9 +6,11 @@ directly to merchant-controlled on-chain addresses. This service must never
 accept, store, transmit, log, or derive a receiving private key, mnemonic, seed
 phrase, or other signing material.
 
-The project is under active implementation. It is not ready to process real
-funds until every phase in `phases.md`, the security and compliance reviews, and
-the production release gates have completed successfully.
+All twelve implementation phases in `phases.md` are complete with validation
+evidence. The system is not yet cleared to process real funds: that requires
+the human release gates recorded in `docs/RELEASE_SIGNOFF.md` — qualified
+legal/compliance review, operator release approval, public-testnet
+verification, independent threat-model review, and a live alert paging test.
 
 ## v1 scope
 
