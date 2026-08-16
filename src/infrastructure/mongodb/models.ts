@@ -347,7 +347,14 @@ export const onChainEventSchema = new Schema(
   {
     eventId: immutableIdentifier,
     chain: immutableReference("Chain"),
-    token: immutableReference("Token"),
+    // Resolved during interpretation (ADR 0010), not captured at ingest, so it
+    // is mutable; raw capture fields remain immutable.
+    token: {
+      type: String,
+      match: identifierPattern,
+      maxlength: 128,
+      ref: "Token",
+    },
     contractAddress: immutableAddress,
     normalizedContractAddress: immutableNormalizedAddress,
     transactionHash: immutableString({ match: transactionHashPattern }),
@@ -360,6 +367,18 @@ export const onChainEventSchema = new Schema(
     normalizedToAddress: immutableNormalizedAddress,
     amount: { ...requiredNonNegativeAmount, immutable: true },
     rawEvent: { type: Schema.Types.Mixed, required: true, immutable: true },
+    interpretationStatus: {
+      type: String,
+      enum: ["accepted", "rejected", "review"],
+    },
+    interpretationReason: {
+      type: String,
+      match: /^[a-z][a-z0-9_]{1,63}$/,
+      maxlength: 64,
+    },
+    verifiedReceivedAmount: optionalNonNegativeAmount,
+    interpretedAt: { type: Date },
+    interpretationRevision: { type: String, match: sha256Pattern },
     matchedPaymentId: { type: String, match: identifierPattern, ref: "Payment" },
     canonical: { type: Boolean, required: true, default: true },
     confirmationsAtIngest: { type: Number, min: 0, max: Number.MAX_SAFE_INTEGER },

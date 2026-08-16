@@ -37,6 +37,17 @@ x-application: &application
     PAYMENT_EXPIRY_DEFAULT_SEC: 900
     IDEMPOTENCY_TTL_SEC: 86400
     PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE: 60
+    INGESTION_HMAC_CURRENT_KEY_ID: local-v1
+    INGESTION_HMAC_CURRENT_SECRET: local-ingestion-hmac-secret-change-me-32
+    INGESTION_HMAC_PREVIOUS_KEY_ID: ""
+    INGESTION_HMAC_PREVIOUS_SECRET: ""
+    INGESTION_TIMESTAMP_SKEW_SEC: 300
+    INGESTION_NONCE_TTL_SEC: 600
+    INTERNAL_INGESTION_BASE_URL: http://api:3000
+    WATCHER_POLL_INTERVAL_MS: 2000
+    WATCHER_BATCH_SIZE: 10
+    WATCHER_REGISTRY_REFRESH_SEC: 30
+    WATCHER_INITIAL_LOOKBACK_BLOCKS: 0
     SANCTIONS_STATIC_LIST: '{"listVersion":"local-test-v1","addresses":["0xD78523784b3A8e5c21D026eE7Fe405C39D1542ac"]}'
     SCREENING_CACHE_TTL_SEC: 604800
   depends_on:
@@ -308,10 +319,24 @@ services:
   watcher:
     <<: *application
     command: ["node", "dist/processes/watcher.js"]
+    depends_on:
+      mongodb-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
 
   processor:
     <<: *application
     command: ["node", "dist/processes/processor.js"]
+    depends_on:
+      mongodb-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
 
   scheduler:
     <<: *application

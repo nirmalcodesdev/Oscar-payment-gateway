@@ -27,6 +27,17 @@ function provider(overrides: Partial<EvmProviderClient> = {}): EvmProviderClient
         totalSupply: 1_000_000n,
         nonStandard: [],
       }),
+    getBlockHeader: () =>
+      Promise.resolve({
+        blockNumber: 100,
+        blockHash: `0x${"a".repeat(64)}`,
+        parentHash: `0x${"b".repeat(64)}`,
+      }),
+    getLogs: () => Promise.resolve([]),
+    getTransactionReceipt: () =>
+      Promise.resolve({ blockNumber: 100, blockHash: `0x${"a".repeat(64)}` }),
+    readErc20Balance: () => Promise.resolve(0n),
+    readErc20Decimals: () => Promise.resolve(6),
     ...overrides,
   };
 }

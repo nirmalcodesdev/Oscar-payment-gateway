@@ -14,12 +14,32 @@ import {
 } from "viem";
 
 import type { RuntimeConfig } from "../../config/environment.js";
+import type {
+  ChainLogEntry,
+  ChainLogFilter,
+  ObservedBlockHeader,
+} from "../../domain/chain/chain-adapter.js";
 
 const erc20MetadataAbi = parseAbi([
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
   "function totalSupply() view returns (uint256)",
+  "function balanceOf(address) view returns (uint256)",
 ]);
+
+/** ERC-20 transfer event ABI used for canonical `Transfer` log filtering. */
+export const erc20TransferAbi = parseAbi([
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+]);
+
+/** Canonical keccak256 topic of `Transfer(address indexed, address indexed, uint256)`. */
+export const erc20TransferTopic =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+export interface EvmTransactionReceipt {
+  readonly blockNumber: number;
+  readonly blockHash: string;
+}
 
 export interface RpcProviderReference {
   readonly providerId: string;
@@ -61,13 +81,24 @@ export interface EvmProviderClient {
     blockNumber: bigint,
   ): Promise<`0x${string}` | undefined>;
   readTokenMetadata(address: Address, blockNumber: bigint): Promise<TokenMetadataRead>;
+  getBlockHeader(blockNumber: bigint): Promise<ObservedBlockHeader>;
+  getLogs(filter: ChainLogFilter): Promise<readonly ChainLogEntry[]>;
+  getTransactionReceipt(
+    transactionHash: `0x${string}`,
+  ): Promise<EvmTransactionReceipt | undefined>;
+  readErc20Balance(
+    contract: Address,
+    holder: Address,
+    blockNumber: bigint,
+  ): Promise<bigint>;
+  readErc20Decimals(contract: Address, blockNumber: bigint): Promise<number>;
 }
 
 export interface EvmProviderClientFactory {
   create(providerId: string, url: string, timeoutMs: number): EvmProviderClient;
 }
 
-function containsNonStandardContractError(error: unknown): boolean {
+export function containsNonStandardContractError(error: unknown): boolean {
   const isNonStandard = (nested: unknown) =>
     nested instanceof ContractFunctionRevertedError ||
     nested instanceof ContractFunctionZeroDataError ||
@@ -149,6 +180,94 @@ class ViemEvmProviderClient implements EvmProviderClient {
       ],
     };
   }
+
+  public async getBlockHeader(blockNumber: bigint): Promise<ObservedBlockHeader> {
+    const block = await this.#client.getBlock({ blockNumber });
+    return {
+      blockNumber: Number(block.number),
+      blockHash: block.hash,
+      parentHash: block.parentHash,
+    };
+  }
+
+  public async getLogs(filter: ChainLogFilter): Promise<readonly ChainLogEntry[]> {
+    if (filter.transferTopic !== erc20TransferTopic) {
+      throw new Error("Unsupported log filter topic");
+    }
+    const logs = await this.#client.getLogs({
+      address: [...filter.contractAddresses] as Address[],
+      event: erc20TransferAbi[0],
+      fromBlock: BigInt(filter.fromBlock),
+      toBlock: BigInt(filter.toBlock),
+    });
+    return logs.map((log) => ({
+      contractAddress: log.address,
+      transactionHash: log.transactionHash,
+      logIndex: log.logIndex,
+      blockNumber: Number(log.blockNumber),
+      blockHash: log.blockHash,
+      topics: log.topics,
+      data: log.data,
+      raw: {
+        address: log.address,
+        topics: [...log.topics],
+        data: log.data,
+        transactionHash: log.transactionHash,
+        transactionIndex: log.transactionIndex,
+        blockHash: log.blockHash,
+        blockNumber: log.blockNumber.toString(),
+        logIndex: log.logIndex,
+        removed: log.removed,
+      },
+    }));
+  }
+
+  public async getTransactionReceipt(
+    transactionHash: `0x${string}`,
+  ): Promise<EvmTransactionReceipt | undefined> {
+    try {
+      const receipt = await this.#client.getTransactionReceipt({
+        hash: transactionHash,
+      });
+      return {
+        blockNumber: Number(receipt.blockNumber),
+        blockHash: receipt.blockHash,
+      };
+    } catch (error: unknown) {
+      if (containsNotFoundError(error)) return undefined;
+      throw error;
+    }
+  }
+
+  public readErc20Balance(
+    contract: Address,
+    holder: Address,
+    blockNumber: bigint,
+  ): Promise<bigint> {
+    return this.#client.readContract({
+      address: contract,
+      abi: erc20MetadataAbi,
+      functionName: "balanceOf",
+      args: [holder],
+      blockNumber,
+    });
+  }
+
+  public readErc20Decimals(contract: Address, blockNumber: bigint): Promise<number> {
+    return this.#client.readContract({
+      address: contract,
+      abi: erc20MetadataAbi,
+      functionName: "decimals",
+      blockNumber,
+    });
+  }
+}
+
+function containsNotFoundError(error: unknown): boolean {
+  if (!(error instanceof BaseError)) return false;
+  const isNotFound = (nested: unknown) =>
+    nested instanceof Error && nested.name.endsWith("NotFoundError");
+  return isNotFound(error) || error.walk(isNotFound) !== null;
 }
 
 export const viemProviderClientFactory: EvmProviderClientFactory = {
