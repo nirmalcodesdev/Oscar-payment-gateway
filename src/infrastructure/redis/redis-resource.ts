@@ -18,7 +18,29 @@ export class RedisResource implements ManagedResource {
 
   public async start(): Promise<void> {
     try {
-      await this.client.connect();
+      if (this.client.status === "wait") {
+        await this.client.connect();
+      } else if (this.client.status === "connecting") {
+        // A BullMQ queue or worker constructed with the shared client may have
+        // initiated the connection already; wait for that attempt instead of
+        // erroring, while still failing closed if it ultimately fails.
+        await new Promise<void>((resolve, reject) => {
+          const settle = (): void => {
+            this.client.off("ready", onReady);
+            this.client.off("error", onError);
+          };
+          const onReady = (): void => {
+            settle();
+            resolve();
+          };
+          const onError = (error: Error): void => {
+            settle();
+            reject(error);
+          };
+          this.client.once("ready", onReady);
+          this.client.once("error", onError);
+        });
+      }
       await this.client.ping();
     } catch (error: unknown) {
       this.client.disconnect(false);

@@ -196,6 +196,22 @@ const environmentSchema = z
     PAYMENT_EXPIRY_DEFAULT_SEC: integerFromEnvironment(60, 86_400).default(900),
     IDEMPOTENCY_TTL_SEC: integerFromEnvironment(300, 604_800).default(86_400),
     PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE: integerFromEnvironment(1, 1_000).default(30),
+    INGESTION_HMAC_CURRENT_KEY_ID: z.string().trim().min(1).max(128),
+    INGESTION_HMAC_CURRENT_SECRET: secretFromEnvironment,
+    INGESTION_HMAC_PREVIOUS_KEY_ID: z
+      .string()
+      .trim()
+      .max(128)
+      .optional()
+      .or(z.literal("")),
+    INGESTION_HMAC_PREVIOUS_SECRET: optionalSecretFromEnvironment,
+    INGESTION_TIMESTAMP_SKEW_SEC: integerFromEnvironment(30, 3_600).default(300),
+    INGESTION_NONCE_TTL_SEC: integerFromEnvironment(60, 604_800).default(600),
+    INTERNAL_INGESTION_BASE_URL: z.url(),
+    WATCHER_POLL_INTERVAL_MS: integerFromEnvironment(100, 60_000).default(2_000),
+    WATCHER_BATCH_SIZE: integerFromEnvironment(1, 100).default(10),
+    WATCHER_REGISTRY_REFRESH_SEC: integerFromEnvironment(5, 3_600).default(30),
+    WATCHER_INITIAL_LOOKBACK_BLOCKS: integerFromEnvironment(0, 100_000).default(0),
     SANCTIONS_STATIC_LIST: sanctionsStaticList,
     SCREENING_CACHE_TTL_SEC: integerFromEnvironment(300, 2_592_000).default(604_800),
   })
@@ -247,6 +263,21 @@ export interface RuntimeConfig {
     readonly expiryDefaultSec: number;
     readonly idempotencyTtlSec: number;
     readonly createRateLimitPerMinute: number;
+  };
+  readonly ingestion: {
+    readonly hmacCurrentKeyId: string;
+    readonly hmacCurrentSecret: string;
+    readonly hmacPreviousKeyId?: string;
+    readonly hmacPreviousSecret?: string;
+    readonly timestampSkewSec: number;
+    readonly nonceTtlSec: number;
+    readonly internalBaseUrl: string;
+  };
+  readonly watcher: {
+    readonly pollIntervalMs: number;
+    readonly batchSize: number;
+    readonly registryRefreshSec: number;
+    readonly initialLookbackBlocks: number;
   };
   readonly compliance: {
     readonly sanctionsStaticList: {
@@ -373,6 +404,42 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       "ADMIN_JWT_PREVIOUS_KEY_ID and ADMIN_JWT_PREVIOUS_SECRET must be configured together",
     ]);
   }
+  const ingestionPreviousKeyId =
+    result.data.INGESTION_HMAC_PREVIOUS_KEY_ID === ""
+      ? undefined
+      : result.data.INGESTION_HMAC_PREVIOUS_KEY_ID;
+  const ingestionPreviousSecret =
+    result.data.INGESTION_HMAC_PREVIOUS_SECRET === ""
+      ? undefined
+      : result.data.INGESTION_HMAC_PREVIOUS_SECRET;
+  if (
+    (ingestionPreviousKeyId === undefined) !==
+    (ingestionPreviousSecret === undefined)
+  ) {
+    throw new ConfigurationError([
+      "INGESTION_HMAC_PREVIOUS_KEY_ID and INGESTION_HMAC_PREVIOUS_SECRET must be configured together",
+    ]);
+  }
+  if (ingestionPreviousKeyId !== undefined) {
+    if (ingestionPreviousKeyId === result.data.INGESTION_HMAC_CURRENT_KEY_ID) {
+      throw new ConfigurationError([
+        "INGESTION_HMAC_PREVIOUS_KEY_ID must differ from INGESTION_HMAC_CURRENT_KEY_ID",
+      ]);
+    }
+    if (ingestionPreviousSecret === result.data.INGESTION_HMAC_CURRENT_SECRET) {
+      throw new ConfigurationError([
+        "INGESTION_HMAC_PREVIOUS_SECRET must differ from INGESTION_HMAC_CURRENT_SECRET",
+      ]);
+    }
+  }
+  if (
+    result.data.INGESTION_NONCE_TTL_SEC <
+    result.data.INGESTION_TIMESTAMP_SKEW_SEC * 2
+  ) {
+    throw new ConfigurationError([
+      "INGESTION_NONCE_TTL_SEC must cover at least twice the timestamp skew window",
+    ]);
+  }
 
   return Object.freeze({
     nodeEnv: result.data.NODE_ENV,
@@ -419,6 +486,25 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       expiryDefaultSec: result.data.PAYMENT_EXPIRY_DEFAULT_SEC,
       idempotencyTtlSec: result.data.IDEMPOTENCY_TTL_SEC,
       createRateLimitPerMinute: result.data.PAYMENT_CREATE_RATE_LIMIT_PER_MINUTE,
+    }),
+    ingestion: Object.freeze({
+      hmacCurrentKeyId: result.data.INGESTION_HMAC_CURRENT_KEY_ID,
+      hmacCurrentSecret: result.data.INGESTION_HMAC_CURRENT_SECRET,
+      ...(ingestionPreviousKeyId === undefined
+        ? {}
+        : { hmacPreviousKeyId: ingestionPreviousKeyId }),
+      ...(ingestionPreviousSecret === undefined
+        ? {}
+        : { hmacPreviousSecret: ingestionPreviousSecret }),
+      timestampSkewSec: result.data.INGESTION_TIMESTAMP_SKEW_SEC,
+      nonceTtlSec: result.data.INGESTION_NONCE_TTL_SEC,
+      internalBaseUrl: result.data.INTERNAL_INGESTION_BASE_URL,
+    }),
+    watcher: Object.freeze({
+      pollIntervalMs: result.data.WATCHER_POLL_INTERVAL_MS,
+      batchSize: result.data.WATCHER_BATCH_SIZE,
+      registryRefreshSec: result.data.WATCHER_REGISTRY_REFRESH_SEC,
+      initialLookbackBlocks: result.data.WATCHER_INITIAL_LOOKBACK_BLOCKS,
     }),
     compliance: Object.freeze({
       sanctionsStaticList: Object.freeze({

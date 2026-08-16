@@ -11,6 +11,17 @@ import type { Logger } from "pino";
 
 import { ApplicationError } from "../../domain/errors/application-error.js";
 
+// The internal ingestion endpoint verifies HMAC over the exact request bytes
+// (ADR 0010). Because this app-level parser is the only JSON body parser a
+// request passes through, the raw bytes must be captured here through its
+// `verify` hook; a downstream route-local parser never runs once the body has
+// been parsed (body-parser marks `req._body` and skips reparsing).
+declare module "express-serve-static-core" {
+  interface Request {
+    rawBody?: Buffer;
+  }
+}
+
 export interface ReadinessProbe {
   isReady(): Promise<boolean>;
 }
@@ -40,6 +51,12 @@ function isMalformedJson(error: unknown): error is SyntaxError {
   return candidate.status === 400 && candidate.type === "entity.parse.failed";
 }
 
+function isPayloadTooLarge(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { status?: unknown; type?: unknown };
+  return candidate.status === 413 && candidate.type === "entity.too.large";
+}
+
 export function createApp(
   logger: Logger,
   readiness: ReadinessProbe,
@@ -64,7 +81,17 @@ export function createApp(
       },
     }),
   );
-  app.use(express.json({ limit: "64kb", strict: true }));
+  // Capture the exact request bytes through the parser's `verify` hook so
+  // HMAC signature verification operates on byte-identical input (ADR 0010).
+  app.use(
+    express.json({
+      limit: "64kb",
+      strict: true,
+      verify: (rawRequest, _rawResponse, buffer) => {
+        (rawRequest as express.Request).rawBody = buffer;
+      },
+    }),
+  );
 
   app.get("/health", (_request, response) => {
     response.status(200).json({ status: "ok" });
@@ -97,7 +124,9 @@ export function createApp(
         ? unknownError
         : isMalformedJson(unknownError)
           ? new ApplicationError("VALIDATION_ERROR", "Request body is invalid", 400)
-          : undefined;
+          : isPayloadTooLarge(unknownError)
+            ? new ApplicationError("VALIDATION_ERROR", "Request body is too large", 413)
+            : undefined;
     const statusCode = applicationError?.statusCode ?? 500;
     const envelope: ErrorEnvelope = {
       error: {

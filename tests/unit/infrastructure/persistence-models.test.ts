@@ -126,10 +126,12 @@ describe("persistence model contracts", () => {
     ]) {
       expect(modelDefinitions.Payment.path(path).options["immutable"]).toBe(true);
     }
+    // `token` is resolved during interpretation (ADR 0010), not captured at
+    // ingest, so it is deliberately mutable; only raw capture fields stay
+    // immutable.
     for (const path of [
       "eventId",
       "chain",
-      "token",
       "contractAddress",
       "transactionHash",
       "logIndex",

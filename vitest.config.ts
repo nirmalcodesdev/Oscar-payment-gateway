@@ -29,6 +29,7 @@ export default defineConfig({
         "src/interfaces/http/merchant-security-router.ts",
         "src/interfaces/http/admin-registry-router.ts",
         "src/interfaces/http/payments-router.ts",
+        "src/interfaces/http/internal-events-router.ts",
       ],
       thresholds: {
         branches: 80,
