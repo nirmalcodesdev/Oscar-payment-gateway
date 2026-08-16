@@ -4,6 +4,7 @@ import mongoose, { type Connection } from "mongoose";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { ScreeningService } from "../../src/application/compliance/screening-service.js";
 import { PaymentMatchingService } from "../../src/application/processing/payment-matching-service.js";
 import {
   PaymentConfirmationService,
@@ -82,7 +83,10 @@ describeWithMongo("Phase 07 payment processing", () => {
     });
     await connection.asPromise();
     models = registerPersistenceModels(connection);
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(4);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+    // Hermetic suite: unexpired screening cache records from other runs must
+    // not leak into the scripted screening assertions.
+    await models.ComplianceScreening.collection.deleteMany({});
   });
 
   afterAll(async () => {
@@ -650,7 +654,9 @@ describeWithMongo("Phase 07 payment processing", () => {
     function scriptedScreening(
       verdict: "clear" | "blocked" | "unavailable",
     ): SanctionsScreeningProvider {
-      return {
+      // Wrapped in the real screening facade so record-keeping matches
+      // production (ADR 0013); the facade dedupes via its cache.
+      const scripted: SanctionsScreeningProvider = {
         screen: () =>
           Promise.resolve({
             verdict,
@@ -662,6 +668,12 @@ describeWithMongo("Phase 07 payment processing", () => {
             rawResponse: {},
           }),
       };
+      return new ScreeningService(
+        connection,
+        testConfig().compliance,
+        scripted,
+        logger,
+      );
     }
 
     it("walks matched through confirming to a capped confirmed terminal", async () => {

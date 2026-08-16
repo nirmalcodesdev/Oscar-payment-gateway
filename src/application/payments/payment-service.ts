@@ -280,7 +280,6 @@ export class PaymentService {
       const now = new Date();
       const paymentId = `payment_${randomUUID()}`;
       const walletAddressId = `wallet_address_${randomUUID()}`;
-      const screeningId = `screening_${randomUUID()}`;
       const expiresAt = new Date(now.getTime() + expirySec * 1000);
       const qrCodeData = buildEip681Uri({
         networkChainId: snapshot.networkChainId,
@@ -326,31 +325,9 @@ export class PaymentService {
         ],
         { session },
       );
-      await this.#models.ComplianceScreening.create(
-        [
-          {
-            screeningId,
-            address: recipientAddress,
-            normalizedAddress: recipientAddress.toLowerCase(),
-            chain: input.chain,
-            provider: screening.provider,
-            riskLevel: screening.riskLevel,
-            sanctioned: screening.sanctioned,
-            checkedAt: now,
-            rawResponse: screening.rawResponse,
-            ...(screening.providerVersion === undefined
-              ? {}
-              : { providerVersion: screening.providerVersion }),
-            ...(screening.listVersion === undefined
-              ? {}
-              : { listVersion: screening.listVersion }),
-            expiresAt: new Date(
-              now.getTime() + this.#config.compliance.screeningCacheTtlSec * 1000,
-            ),
-          },
-        ],
-        { session },
-      );
+      // The screening record is written by the screening facade before this
+      // transaction opens (ADR 0013); the cached verdict is reused only
+      // within the TTL and the current list version.
       await appendAuditEntryInTransaction(
         this.#connection,
         {

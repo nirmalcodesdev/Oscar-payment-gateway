@@ -549,6 +549,9 @@ export const complianceScreeningSchema = new Schema(
     normalizedAddress: immutableNormalizedAddress,
     chain: immutableReference("Chain"),
     provider: immutableString({ maxlength: 128 }),
+    verdict: immutableString({
+      enum: ["clear", "flagged", "blocked", "unavailable", "indeterminate"],
+    }),
     riskLevel: immutableString({
       enum: ["clear", "low", "medium", "high", "blocked", "unknown"],
     }),
@@ -735,6 +738,77 @@ reconciliationAnnotationSchema.index(
   { name: "ix_reconciliation_entity" },
 );
 
+export const sanctionsListSchema = new Schema(
+  {
+    listId: immutableIdentifier,
+    listVersion: immutableString({ minlength: 1, maxlength: 128 }),
+    source: immutableString({ minlength: 1, maxlength: 512 }),
+    contentHash: immutableString({ match: sha256Pattern }),
+    entryCount: immutableBoundedCounter,
+    status: { type: String, required: true, enum: ["active", "retired"] },
+    ingestedAt: immutableDate,
+    retiredAt: { type: Date },
+    version: { ...boundedCounter, default: 0 },
+  },
+  { ...timestampOptions, collection: "sanctions_lists" },
+);
+sanctionsListSchema.index(
+  { listId: 1 },
+  { unique: true, name: "uq_sanctions_list_id" },
+);
+sanctionsListSchema.index(
+  { status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "active" },
+    name: "uq_sanctions_list_single_active",
+  },
+);
+sanctionsListSchema.index(
+  { status: 1, ingestedAt: -1 },
+  { name: "ix_sanctions_list_status_ingested" },
+);
+rejectDeletes(sanctionsListSchema, "Sanctions list");
+
+export const sanctionsAddressSchema = new Schema(
+  {
+    listId: immutableReference("SanctionsList"),
+    normalizedAddress: immutableNormalizedAddress,
+  },
+  { ...strictSchemaOptions, collection: "sanctions_addresses" },
+);
+sanctionsAddressSchema.index(
+  { listId: 1, normalizedAddress: 1 },
+  { unique: true, name: "uq_sanctions_address_list_address" },
+);
+
+export const complianceReviewSchema = new Schema(
+  {
+    reviewId: immutableIdentifier,
+    paymentId: immutableReference("Payment"),
+    decision: immutableString({ enum: ["release", "block"] }),
+    reason: immutableString({ minlength: 10, maxlength: 2000 }),
+    evidence: {
+      type: String,
+      immutable: true,
+      minlength: 1,
+      maxlength: 2000,
+    },
+    reviewedBy: immutableReference("AdminIdentity"),
+    reviewedAt: immutableDate,
+  },
+  { ...strictSchemaOptions, collection: "compliance_reviews" },
+);
+complianceReviewSchema.index(
+  { reviewId: 1 },
+  { unique: true, name: "uq_compliance_review_id" },
+);
+complianceReviewSchema.index(
+  { paymentId: 1, reviewedAt: -1 },
+  { name: "ix_compliance_review_payment_latest" },
+);
+rejectDeletes(complianceReviewSchema, "Compliance review");
+
 export const modelDefinitions = {
   Merchant: merchantSchema,
   MerchantCredential: merchantCredentialSchema,
@@ -756,6 +830,9 @@ export const modelDefinitions = {
   AdminIdentity: adminIdentitySchema,
   AdminSession: adminSessionSchema,
   ReconciliationAnnotation: reconciliationAnnotationSchema,
+  SanctionsList: sanctionsListSchema,
+  SanctionsAddress: sanctionsAddressSchema,
+  ComplianceReview: complianceReviewSchema,
 } as const;
 
 export type PaymentRecord = InferSchemaType<typeof paymentSchema>;
