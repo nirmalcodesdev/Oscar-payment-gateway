@@ -264,5 +264,8 @@ Single EVM family; no sweeps/refunds/signing (future HSM/MPC component);
 screening is the fail-closed static-list fallback plus admin-managed lists
 (integrate a real provider before real funds); webhook egress requires the
 documented SSRF controls; fiat rails, tax reporting, and custody are out of
-scope. This software is not production-ready until Phases 11–12 and the
-pre-launch checklist complete with evidence.
+scope. All twelve implementation phases are complete with validation
+evidence; real-funds production use remains blocked until the human release
+gates in `docs/RELEASE_SIGNOFF.md` (qualified legal/compliance review,
+operator release approval, public-testnet verification, independent
+threat-model review, and a live alert paging test) are recorded.
