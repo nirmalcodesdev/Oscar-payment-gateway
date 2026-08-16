@@ -243,6 +243,24 @@ const environmentSchema = z
     SCHEDULER_WEBHOOK_SWEEP_SEC: integerFromEnvironment(5, 3_600).default(30),
     SCHEDULER_RETENTION_SEC: integerFromEnvironment(300, 86_400).default(3_600),
     STUCK_PAYMENT_THRESHOLD_SEC: integerFromEnvironment(60, 86_400).default(1_800),
+    CORS_ALLOWED_ORIGINS: z
+      .string()
+      .trim()
+      .max(2_048)
+      .default("")
+      .transform((value) =>
+        value === ""
+          ? []
+          : value
+              .split(",")
+              .map((origin) => origin.trim())
+              .filter(Boolean),
+      ),
+    TRUST_PROXY_HOPS: integerFromEnvironment(0, 10).optional(),
+    RATE_LIMIT_PUBLIC_PER_MINUTE: integerFromEnvironment(10, 100_000).default(600),
+    RATE_LIMIT_INGESTION_PER_MINUTE: integerFromEnvironment(10, 1_000_000).default(
+      12_000,
+    ),
   })
   .strict();
 
@@ -322,6 +340,12 @@ export interface RuntimeConfig {
     readonly deliveryTimeoutMs: number;
     readonly maxAttempts: number;
     readonly retentionSec: number;
+  };
+  readonly http: {
+    readonly corsAllowedOrigins: readonly string[];
+    readonly trustProxyHops?: number;
+    readonly rateLimitPublicPerMinute: number;
+    readonly rateLimitIngestionPerMinute: number;
   };
   readonly scheduler: {
     readonly leaseTtlSec: number;
@@ -605,6 +629,14 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       deliveryTimeoutMs: result.data.WEBHOOK_DELIVERY_TIMEOUT_MS,
       maxAttempts: result.data.WEBHOOK_MAX_ATTEMPTS,
       retentionSec: result.data.WEBHOOK_RETENTION_SEC,
+    }),
+    http: Object.freeze({
+      corsAllowedOrigins: Object.freeze([...result.data.CORS_ALLOWED_ORIGINS]),
+      ...(result.data.TRUST_PROXY_HOPS === undefined
+        ? {}
+        : { trustProxyHops: result.data.TRUST_PROXY_HOPS }),
+      rateLimitPublicPerMinute: result.data.RATE_LIMIT_PUBLIC_PER_MINUTE,
+      rateLimitIngestionPerMinute: result.data.RATE_LIMIT_INGESTION_PER_MINUTE,
     }),
     scheduler: Object.freeze({
       leaseTtlSec: result.data.SCHEDULER_LEASE_TTL_SEC,

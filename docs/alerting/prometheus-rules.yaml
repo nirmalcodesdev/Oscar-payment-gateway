@@ -1,0 +1,66 @@
+# Oscar payment gateway alert rules (ADR 0016).
+# Every expression references a metric emitted by GET /metrics.
+groups:
+  - name: oscar-gateway
+    rules:
+      - alert: OscarReadinessDegraded
+        expr: probe_success{job="oscar-ready"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gateway readiness probe failing"
+      - alert: OscarRpcProviderOutage
+        expr: oscar_chain_ready{chain!=""} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No healthy provider for an enabled chain"
+      - alert: OscarTokenDecimalsDegraded
+        expr: oscar_token_decimals_ready{token!=""} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Enabled token decimals unverifiable or mismatched"
+      - alert: OscarStuckPayments
+        expr: oscar_stuck_payments > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Payments stuck in matched/confirming beyond threshold"
+      - alert: OscarDeepReorg
+        expr: increase(oscar_reorg_records_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Reorg recorded; verify finality incident handling"
+      - alert: OscarElevatedFailureRate
+        expr: increase(oscar_payments_by_status{status="failed"}[15m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated failed payment rate"
+      - alert: OscarQueueLag
+        expr: oscar_queue_lag{state="waiting"} > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue backlog growing"
+      - alert: OscarWebhookDeadLetter
+        expr: oscar_webhook_dead_letter > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook deliveries dead-lettered"
+      - alert: OscarComplianceHolds
+        expr: oscar_compliance_holds > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Compliance holds accumulating"

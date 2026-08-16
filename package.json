@@ -38,6 +38,7 @@
     "@scure/bip32": "2.3.0",
     "bullmq": "5.81.3",
     "express": "5.1.0",
+    "helmet": "8.0.0",
     "ioredis": "5.11.1",
     "jose": "6.2.8",
     "mongoose": "8.24.3",

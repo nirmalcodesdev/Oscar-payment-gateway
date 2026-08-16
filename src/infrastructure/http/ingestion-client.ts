@@ -3,6 +3,10 @@ import { randomBytes } from "node:crypto";
 import type { RuntimeConfig } from "../../config/environment.js";
 import type { OnChainDepositEvent } from "../../domain/chain/chain-adapter.js";
 import { ingestionHeaderNames, signIngestionPayload } from "../auth/ingestion-hmac.js";
+import {
+  generateTraceContext,
+  traceParentHeader,
+} from "../observability/trace-context.js";
 
 export interface IngestionSubmitResult {
   readonly eventId: string;
@@ -91,6 +95,8 @@ export class SignedIngestionClient implements IngestionClient {
             [ingestionHeaderNames.timestamp]: timestamp,
             [ingestionHeaderNames.nonce]: nonce,
             [ingestionHeaderNames.signature]: signature,
+            // W3C trace propagation on internal egress (ADR 0016).
+            traceparent: traceParentHeader(generateTraceContext()),
           },
           body: rawBody,
           signal: AbortSignal.timeout(this.#timeoutMs),

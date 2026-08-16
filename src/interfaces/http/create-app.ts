@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import express, {
   type ErrorRequestHandler,
   type Express,
+  type NextFunction,
+  type Request,
   type RequestHandler,
   type Router,
 } from "express";
@@ -10,6 +12,22 @@ import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
 
 import { ApplicationError } from "../../domain/errors/application-error.js";
+import {
+  corsAllowlistMiddleware,
+  helmet,
+} from "../../infrastructure/http/security-middleware.js";
+import {
+  childTraceContext,
+  generateTraceContext,
+  parseTraceParent,
+  traceParentHeader,
+  type TraceContext,
+} from "../../infrastructure/observability/trace-context.js";
+import {
+  apiMetrics,
+  httpRequestsTotal,
+  httpRequestDurationMs,
+} from "../../infrastructure/metrics/registry.js";
 
 // The internal ingestion endpoint verifies HMAC over the exact request bytes
 // (ADR 0010). Because this app-level parser is the only JSON body parser a
@@ -26,8 +44,22 @@ export interface ReadinessProbe {
   isReady(): Promise<boolean>;
 }
 
+export interface OperationalEndpoints {
+  /** Per-IP general public limiter; failures fail open (alerted separately). */
+  publicRateLimit?: RequestHandler;
+  /** Prometheus text rendering with cross-process gauges. */
+  renderMetrics(): Promise<string>;
+  /** Bounded dependency checks; outcomes must not expose provider identity. */
+  readinessChecks?(): Promise<readonly { name: string; ready: boolean }[]>;
+}
+
 interface CreateAppOptions {
   readonly apiRouters?: readonly Router[];
+  readonly security?: {
+    readonly corsAllowedOrigins: readonly string[];
+    readonly trustProxyHops?: number;
+  };
+  readonly operational?: OperationalEndpoints;
 }
 
 interface ErrorEnvelope {
@@ -64,6 +96,23 @@ export function createApp(
 ): Express {
   const app = express();
   app.disable("x-powered-by");
+  if (options.security?.trustProxyHops !== undefined) {
+    // Hop-count proxy trust (ADR 0016): unset means never trust forwarded
+    // headers, so a direct exposure cannot forge rate-limit identities.
+    app.set("trust proxy", options.security.trustProxyHops);
+  }
+  // Security-header baseline (ADR 0016) before anything else runs.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      referrerPolicy: { policy: "no-referrer" },
+      crossOriginResourcePolicy: { policy: "same-site" },
+    }),
+  );
+  // Explicit-origin CORS allowlist; no configured origins means no CORS
+  // headers at all (API-only surface).
+  app.use(corsAllowlistMiddleware(options.security?.corsAllowedOrigins ?? []));
+  app.use(traceContextMiddleware());
   app.use(
     pinoHttp({
       logger,
@@ -77,7 +126,11 @@ export function createApp(
         return id;
       },
       customProps(request) {
-        return { requestId: request.id };
+        return {
+          requestId: request.id,
+          traceId: (request as express.Request & { traceContext?: TraceContext })
+            .traceContext?.traceId,
+        };
       },
     }),
   );
@@ -100,13 +153,39 @@ export function createApp(
   app.get("/ready", (async (_request, response, next) => {
     try {
       const ready = await readiness.isReady();
-      response
-        .status(ready ? 200 : 503)
-        .json({ status: ready ? "ready" : "not_ready" });
+      const detailChecks = (await options.operational?.readinessChecks?.()) ?? [];
+      const detailReady = detailChecks.every((check) => check.ready);
+      const overall = ready && detailReady;
+      response.status(overall ? 200 : 503).json({
+        status: overall ? "ready" : "not_ready",
+        checks: detailChecks.map((check) => ({
+          name: check.name,
+          status: check.ready ? "ready" : "not_ready",
+        })),
+      });
     } catch (error: unknown) {
       next(error);
     }
   }) satisfies RequestHandler);
+
+  if (options.operational !== undefined) {
+    const operational = options.operational;
+    app.get("/metrics", (async (_request, response, next) => {
+      try {
+        const body = await operational.renderMetrics();
+        response
+          .status(200)
+          .setHeader("content-type", "text/plain; version=0.0.4; charset=utf-8")
+          .send(body);
+      } catch (error: unknown) {
+        next(error);
+      }
+    }) satisfies RequestHandler);
+  }
+
+  if (options.operational?.publicRateLimit !== undefined) {
+    app.use(options.operational.publicRateLimit);
+  }
 
   for (const router of options.apiRouters ?? []) {
     app.use("/api/v1", router);
@@ -115,6 +194,28 @@ export function createApp(
   app.use((_request, _response, next) => {
     next(new ApplicationError("NOT_FOUND", "Resource not found", 404));
   });
+
+  // HTTP metrics observe after routing so 404/500 responses count too.
+  app.use(
+    (request: express.Request, response: express.Response, next: NextFunction) => {
+      const startedAt = Date.now();
+      response.on("finish", () => {
+        const routeClass = request.path.startsWith("/api/v1/")
+          ? (request.path.split("/")[3] ?? "root")
+          : "operational";
+        apiMetrics.increment(httpRequestsTotal, [
+          routeClass,
+          String(response.statusCode),
+        ]);
+        apiMetrics.increment(
+          httpRequestDurationMs,
+          [routeClass],
+          Date.now() - startedAt,
+        );
+      });
+      next();
+    },
+  );
 
   const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
     void _next;
@@ -156,4 +257,27 @@ export function createApp(
   app.use(errorHandler);
 
   return app;
+}
+
+/**
+ * W3C trace-context middleware (ADR 0016): accept a valid incoming
+ * `traceparent`, generate one when absent, echo the child context in the
+ * response, and expose it for downstream propagation.
+ */
+function traceContextMiddleware(): RequestHandler {
+  return (request: Request, response, next) => {
+    const header = request.headers["traceparent"];
+    const parent = parseTraceParent(Array.isArray(header) ? header[0] : header);
+    const context =
+      parent === undefined ? generateTraceContext() : childTraceContext(parent);
+    Object.defineProperty(request, "traceContext", { value: context });
+    response.setHeader("traceparent", traceParentHeader(context));
+    next();
+  };
+}
+
+declare module "express-serve-static-core" {
+  interface Request {
+    traceContext?: TraceContext;
+  }
 }

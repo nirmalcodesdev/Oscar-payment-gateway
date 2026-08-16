@@ -7,6 +7,10 @@ import type { RuntimeConfig } from "../../config/environment.js";
 import { registerPersistenceModels } from "../mongodb/models.js";
 import type { ManagedResource } from "../lifecycle/managed-resource.js";
 import { signedWebhookHeaders } from "../auth/webhook-signer.js";
+import {
+  generateTraceContext,
+  traceParentHeader,
+} from "../observability/trace-context.js";
 import { WebhookDeliveryClient, WebhookDeliveryError } from "../http/webhook-client.js";
 import { validateWebhookUrl } from "../../domain/security/webhook-url.js";
 import type { WebhookDispatcher } from "../../application/webhooks/webhook-outbox.js";
@@ -131,6 +135,7 @@ export class WebhookDeliveryWorkerResource implements ManagedResource {
         deliveryId,
         body,
       );
+      headers["traceparent"] = traceParentHeader(generateTraceContext());
       try {
         const validated = validateWebhookUrl(url, options.config.nodeEnv);
         const response = await client.deliver(validated, body, headers);

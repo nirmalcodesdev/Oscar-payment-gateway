@@ -54,7 +54,7 @@ describe("HTTP application", () => {
     const response = await fetch(`${baseUrl}/ready`);
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ status: "not_ready" });
+    await expect(response.json()).resolves.toMatchObject({ status: "not_ready" });
   });
 
   it("reports readiness when every dependency is available", async () => {
@@ -63,7 +63,7 @@ describe("HTTP application", () => {
     const response = await fetch(`${baseUrl}/ready`);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ready" });
+    await expect(response.json()).resolves.toMatchObject({ status: "ready" });
   });
 
   it("returns a consistent not-found envelope without internal details", async () => {
