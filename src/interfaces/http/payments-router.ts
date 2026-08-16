@@ -8,9 +8,9 @@ import { AuthService } from "../../application/auth/auth-service.js";
 import type { MerchantPrincipal } from "../../application/auth/principals.js";
 import { PaymentService } from "../../application/payments/payment-service.js";
 import type { RuntimeConfig } from "../../config/environment.js";
+import type { SanctionsScreeningProvider } from "../../domain/compliance/screening-provider.js";
 import { ApplicationError } from "../../domain/errors/application-error.js";
 import { RedisRateLimiter } from "../../infrastructure/auth/rate-limiter.js";
-import { StaticSanctionsListProvider } from "../../infrastructure/compliance/static-list-provider.js";
 
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/);
 const createPaymentSchema = z
@@ -83,6 +83,7 @@ export interface PaymentsRouterDependencies {
   readonly redis: Redis;
   readonly config: RuntimeConfig;
   readonly logger: Logger;
+  readonly screening: SanctionsScreeningProvider;
 }
 
 export function createPaymentsRouter(dependencies: PaymentsRouterDependencies): Router {
@@ -97,7 +98,7 @@ export function createPaymentsRouter(dependencies: PaymentsRouterDependencies): 
     dependencies.connection,
     dependencies.config,
     rateLimiter,
-    new StaticSanctionsListProvider(dependencies.config.compliance.sanctionsStaticList),
+    dependencies.screening,
     dependencies.logger,
   );
   const requireMerchant = asyncMiddleware(async (request) => {

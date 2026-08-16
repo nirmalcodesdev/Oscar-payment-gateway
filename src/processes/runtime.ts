@@ -1,5 +1,7 @@
 import type { Logger } from "pino";
 
+import { ComplianceService } from "../application/compliance/compliance-service.js";
+import { ScreeningService } from "../application/compliance/screening-service.js";
 import { EventInterpretationService } from "../application/ingestion/event-interpretation-service.js";
 import { PaymentMatchingService } from "../application/processing/payment-matching-service.js";
 import { PaymentConfirmationService } from "../application/processing/payment-confirmation-service.js";
@@ -10,7 +12,7 @@ import {
   resolveChainProviderClients,
   type ResolvedProviderClient,
 } from "../infrastructure/chain/evm-chain-adapter.js";
-import { StaticSanctionsListProvider } from "../infrastructure/compliance/static-list-provider.js";
+import { UpdateableSanctionsListProvider } from "../infrastructure/compliance/updateable-list-provider.js";
 import { EnabledRegistryReader } from "../application/registry/registry-reader.js";
 import { LifecycleManager } from "../infrastructure/lifecycle/lifecycle-manager.js";
 import type { ManagedResource } from "../infrastructure/lifecycle/managed-resource.js";
@@ -28,6 +30,7 @@ import { PaymentLock } from "../infrastructure/redis/payment-lock.js";
 import { RedisResource } from "../infrastructure/redis/redis-resource.js";
 import { createApp } from "../interfaces/http/create-app.js";
 import { createAdminRegistryRouter } from "../interfaces/http/admin-registry-router.js";
+import { createComplianceRouter } from "../interfaces/http/compliance-router.js";
 import { HttpServerResource } from "../interfaces/http/http-server-resource.js";
 import { createInternalEventsRouter } from "../interfaces/http/internal-events-router.js";
 import { createMerchantSecurityRouter } from "../interfaces/http/merchant-security-router.js";
@@ -104,9 +107,18 @@ function createRuntime(processName: ProcessName): Runtime {
       pollIntervalMs: config.processing.confirmationPollIntervalMs,
       service: new PaymentConfirmationService(mongo.connection, config, {
         reader: confirmationReader,
-        screening: new StaticSanctionsListProvider(
-          config.compliance.sanctionsStaticList,
+        screening: new ScreeningService(
+          mongo.connection,
+          config.compliance,
+          new UpdateableSanctionsListProvider(
+            mongo.connection,
+            config.compliance,
+            logger,
+          ),
+          logger,
         ),
+        latestReviewDecision: (paymentId) =>
+          new ComplianceService(mongo.connection, logger).latestDecision(paymentId),
       }),
       logger,
     });
@@ -130,11 +142,29 @@ function createRuntime(processName: ProcessName): Runtime {
     redis: redis.client,
     config,
   });
+  const sanctionsProvider = new UpdateableSanctionsListProvider(
+    mongo.connection,
+    config.compliance,
+    logger,
+  );
   const paymentsRouter = createPaymentsRouter({
     connection: mongo.connection,
     redis: redis.client,
     config,
     logger,
+    screening: new ScreeningService(
+      mongo.connection,
+      config.compliance,
+      sanctionsProvider,
+      logger,
+    ),
+  });
+  const complianceRouter = createComplianceRouter({
+    connection: mongo.connection,
+    redis: redis.client,
+    config,
+    logger,
+    sanctionsProvider,
   });
   const eventQueue = new EventQueueResource(redis.client, config.redis.queuePrefix);
   const internalEventsRouter = createInternalEventsRouter({
@@ -147,6 +177,7 @@ function createRuntime(processName: ProcessName): Runtime {
       merchantSecurityRouter,
       adminRegistryRouter,
       paymentsRouter,
+      complianceRouter,
       internalEventsRouter,
     ],
   });

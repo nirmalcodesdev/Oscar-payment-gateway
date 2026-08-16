@@ -221,6 +221,7 @@ const environmentSchema = z
     REORG_MAX_SCAN_BLOCKS: integerFromEnvironment(2, 10_000).default(200),
     SANCTIONS_STATIC_LIST: sanctionsStaticList,
     SCREENING_CACHE_TTL_SEC: integerFromEnvironment(300, 2_592_000).default(604_800),
+    SCREENING_LIST_MAX_AGE_SEC: integerFromEnvironment(60, 31_536_000).default(604_800),
   })
   .strict();
 
@@ -298,6 +299,7 @@ export interface RuntimeConfig {
       readonly addresses: readonly string[];
     };
     readonly screeningCacheTtlSec: number;
+    readonly screeningListMaxAgeSec: number;
   };
 }
 
@@ -531,6 +533,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
         addresses: Object.freeze([...result.data.SANCTIONS_STATIC_LIST.addresses]),
       }),
       screeningCacheTtlSec: result.data.SCREENING_CACHE_TTL_SEC,
+      screeningListMaxAgeSec: result.data.SCREENING_LIST_MAX_AGE_SEC,
     }),
   });
 }

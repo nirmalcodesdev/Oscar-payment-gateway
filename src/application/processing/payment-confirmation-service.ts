@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import type { Connection } from "mongoose";
 import type { Logger } from "pino";
@@ -80,6 +80,9 @@ export class PaymentConfirmationService {
   readonly #config: RuntimeConfig;
   readonly #reader: PaymentConfirmationReader;
   readonly #screening: SanctionsScreeningProvider;
+  readonly #latestReviewDecision:
+    | ((paymentId: string) => Promise<"release" | "block" | undefined>)
+    | undefined;
 
   public constructor(
     connection: Connection,
@@ -87,6 +90,9 @@ export class PaymentConfirmationService {
     dependencies: {
       readonly reader: PaymentConfirmationReader;
       readonly screening: SanctionsScreeningProvider;
+      readonly latestReviewDecision?: (
+        paymentId: string,
+      ) => Promise<"release" | "block" | undefined>;
     },
   ) {
     this.#connection = connection;
@@ -94,6 +100,7 @@ export class PaymentConfirmationService {
     this.#config = config;
     this.#reader = dependencies.reader;
     this.#screening = dependencies.screening;
+    this.#latestReviewDecision = dependencies.latestReviewDecision;
   }
 
   public async advancePayment(
@@ -259,54 +266,63 @@ export class PaymentConfirmationService {
 
     // Threshold reached: fresh compliance check of the event sender gates
     // the terminal confirmation (fail closed on any non-clear verdict).
+    // Record-keeping and caching live in the screening facade (ADR 0013).
+    const decision =
+      (await this.#latestReviewDecision?.(payment.paymentId)) ?? undefined;
+    if (decision === "block") {
+      // An authorized block decision pins the hold regardless of any later
+      // clear screen (ADR 0013): only a newer decision can unpin it.
+      await this.#annotate(
+        "Payment",
+        payment.paymentId,
+        "compliance",
+        "Blocked by an authorized compliance review decision",
+        payment.merchantId,
+      );
+      return { outcome: "held" };
+    }
+
     const screening = await this.#screening.screen({
       address: event.fromAddress,
       chain: event.chain,
     });
     const screeningStatus = screeningStatusForVerdict(screening.verdict);
     const now2 = new Date();
-    await this.#models.ComplianceScreening.create({
-      screeningId: `screen_${randomUUID()}`,
-      address: event.fromAddress,
-      normalizedAddress: event.normalizedFromAddress,
-      chain: event.chain,
-      provider: screening.provider,
-      riskLevel: screening.riskLevel,
-      sanctioned: screening.sanctioned,
-      checkedAt: now2,
-      rawResponse: screening.rawResponse,
-      ...(screening.providerVersion === undefined
-        ? {}
-        : { providerVersion: screening.providerVersion }),
-      ...(screening.listVersion === undefined
-        ? {}
-        : { listVersion: screening.listVersion }),
-      expiresAt: new Date(
-        now2.getTime() + this.#config.compliance.screeningCacheTtlSec * 1000,
-      ),
-    });
 
     if (screeningStatus !== "clear") {
-      // Compliance hold: the payment can never reach `confirmed` and can
-      // never emit a confirmation webhook while held (ADR 0011).
-      if (payment.screeningStatus !== screeningStatus) {
-        await this.#applyTransition(
-          payment,
-          payment.status as PaymentStatus,
-          { screeningStatus },
-          event,
-          logger,
-          "payment_compliance_hold",
+      if (decision !== "release") {
+        // Compliance hold: the payment can never reach `confirmed` and can
+        // never emit a confirmation webhook while held (ADR 0011). Only an
+        // authorized audited release decision can override (ADR 0013).
+        if (payment.screeningStatus !== screeningStatus) {
+          await this.#applyTransition(
+            payment,
+            payment.status as PaymentStatus,
+            { screeningStatus },
+            event,
+            logger,
+            "payment_compliance_hold",
+          );
+        }
+        await this.#annotate(
+          "Payment",
+          payment.paymentId,
+          "compliance",
+          `Sender screening verdict ${screening.verdict} holds confirmation for manual review`,
+          payment.merchantId,
         );
+        return { outcome: "held" };
       }
-      await this.#annotate(
-        "Payment",
-        payment.paymentId,
-        "compliance",
-        `Sender screening verdict ${screening.verdict} holds confirmation for manual review`,
-        payment.merchantId,
+      // Cleared with an authorized override; the confirmation audit records
+      // the override provenance below.
+      await this.#applyTransition(
+        payment,
+        payment.status as PaymentStatus,
+        { screeningStatus: "clear" },
+        event,
+        logger,
+        "payment_compliance_override_released",
       );
-      return { outcome: "held" };
     }
 
     const evaluation = evaluatePaymentTransition({
