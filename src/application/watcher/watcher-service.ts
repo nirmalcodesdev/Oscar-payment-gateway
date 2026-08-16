@@ -105,6 +105,18 @@ export interface WatcherServiceOptions {
   readonly logger: Logger;
   readonly logDecoder?: WatcherLogDecoder;
   readonly registryReader?: EnabledRegistryReader;
+  /**
+   * Fork resolution hook (ADR 0012). When absent the Phase 06 behavior
+   * stands: a discontinuity halts the chain indefinitely.
+   */
+  readonly reorgResolver?: {
+    resolve(runtime: {
+      readonly chainId: string;
+      readonly observation: ChainObservationPort;
+      readonly corroborator: BlockHeaderCorroborator;
+      readonly cursorStorage: ChainCursorStorage;
+    }): Promise<"resolved" | "unresolvable">;
+  };
 }
 
 /**
@@ -125,6 +137,7 @@ export class WatcherService {
   readonly #runtimeFactory: WatcherChainRuntimeFactory;
   readonly #logger: Logger;
   readonly #logDecoder: WatcherLogDecoder;
+  readonly #reorgResolver: WatcherServiceOptions["reorgResolver"];
   readonly #chains = new Map<string, ChainWatchState>();
   readonly #tokenVersions = new Map<string, number>();
   #registryRevision: string | undefined;
@@ -144,6 +157,7 @@ export class WatcherService {
     this.#runtimeFactory = options.runtimeFactory;
     this.#logger = options.logger.child({ component: "watcher-service" });
     this.#logDecoder = options.logDecoder ?? evmWatcherLogDecoder;
+    this.#reorgResolver = options.reorgResolver;
   }
 
   public getStatus(): WatcherStatus {
@@ -381,10 +395,29 @@ export class WatcherService {
           progressed = await this.#processNextBatch(state, logger);
         } catch (error: unknown) {
           if (error instanceof ChainDiscontinuityError) {
+            const resolution =
+              this.#reorgResolver === undefined
+                ? "unresolvable"
+                : await this.#resolveDiscontinuity(state, logger).catch(
+                    (resolutionError: unknown) => {
+                      logger.error(
+                        { err: resolutionError },
+                        "Reorg resolution crashed; halting chain",
+                      );
+                      return "unresolvable" as const;
+                    },
+                  );
+            if (resolution === "resolved") {
+              logger.warn(
+                { err: error },
+                "Parent-hash discontinuity resolved; replaying from the rewound cursor",
+              );
+              continue;
+            }
             state.halted = true;
             logger.error(
               { err: error },
-              "Chain halted at block parent-hash discontinuity; cursor left before the discontinuity for Phase 07 resolution",
+              "Chain halted at block parent-hash discontinuity; cursor left before the break for operator resolution",
             );
             return;
           }
@@ -399,6 +432,24 @@ export class WatcherService {
         }
       }
     })();
+  }
+
+  async #resolveDiscontinuity(
+    state: ChainWatchState,
+    logger: Logger,
+  ): Promise<"resolved" | "unresolvable"> {
+    if (this.#reorgResolver === undefined) return "unresolvable";
+    const runtime = state.runtime;
+    logger.warn(
+      { chainId: runtime.chainId },
+      "Parent-hash discontinuity detected; attempting bounded reorg resolution",
+    );
+    return this.#reorgResolver.resolve({
+      chainId: runtime.chainId,
+      observation: runtime.observation,
+      corroborator: runtime.corroborator,
+      cursorStorage: runtime.cursorStorage,
+    });
   }
 
   async #stopChain(state: ChainWatchState): Promise<void> {

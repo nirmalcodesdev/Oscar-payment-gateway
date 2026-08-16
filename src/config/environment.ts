@@ -212,6 +212,13 @@ const environmentSchema = z
     WATCHER_BATCH_SIZE: integerFromEnvironment(1, 100).default(10),
     WATCHER_REGISTRY_REFRESH_SEC: integerFromEnvironment(5, 3_600).default(30),
     WATCHER_INITIAL_LOOKBACK_BLOCKS: integerFromEnvironment(0, 100_000).default(0),
+    OVERPAYMENT_ALLOW: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((value) => value === "true"),
+    LATE_PAYMENT_GRACE_SEC: integerFromEnvironment(60, 86_400).default(900),
+    CONFIRMATION_POLL_INTERVAL_MS: integerFromEnvironment(500, 60_000).default(5_000),
+    REORG_MAX_SCAN_BLOCKS: integerFromEnvironment(2, 10_000).default(200),
     SANCTIONS_STATIC_LIST: sanctionsStaticList,
     SCREENING_CACHE_TTL_SEC: integerFromEnvironment(300, 2_592_000).default(604_800),
   })
@@ -278,6 +285,12 @@ export interface RuntimeConfig {
     readonly batchSize: number;
     readonly registryRefreshSec: number;
     readonly initialLookbackBlocks: number;
+  };
+  readonly processing: {
+    readonly overpaymentAllow: boolean;
+    readonly latePaymentGraceSec: number;
+    readonly confirmationPollIntervalMs: number;
+    readonly reorgMaxScanBlocks: number;
   };
   readonly compliance: {
     readonly sanctionsStaticList: {
@@ -505,6 +518,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): RuntimeConf
       batchSize: result.data.WATCHER_BATCH_SIZE,
       registryRefreshSec: result.data.WATCHER_REGISTRY_REFRESH_SEC,
       initialLookbackBlocks: result.data.WATCHER_INITIAL_LOOKBACK_BLOCKS,
+    }),
+    processing: Object.freeze({
+      overpaymentAllow: result.data.OVERPAYMENT_ALLOW,
+      latePaymentGraceSec: result.data.LATE_PAYMENT_GRACE_SEC,
+      confirmationPollIntervalMs: result.data.CONFIRMATION_POLL_INTERVAL_MS,
+      reorgMaxScanBlocks: result.data.REORG_MAX_SCAN_BLOCKS,
     }),
     compliance: Object.freeze({
       sanctionsStaticList: Object.freeze({

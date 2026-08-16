@@ -262,6 +262,17 @@ function fakeChainRuntime(chainId: string) {
       for (const block of headers) observed.add(block.blockHash);
       return Promise.resolve();
     },
+    rewind: ({ expectedVersion, lastProcessedBlock, lastProcessedBlockHash }) => {
+      if (cursor === undefined || expectedVersion !== cursor.version) {
+        return Promise.resolve(false);
+      }
+      cursor = {
+        lastProcessedBlock,
+        lastProcessedBlockHash,
+        version: cursor.version + 1,
+      };
+      return Promise.resolve(true);
+    },
   };
 
   const adapter: ChainAdapter = {
@@ -941,6 +952,7 @@ describe("WatcherService poll pipeline", () => {
         }
         return realAdvance(advanceInput);
       },
+      rewind: (rewindInput) => harness.runtime.cursorStorage.rewind(rewindInput),
     };
     const runtime: WatcherChainRuntime = { ...harness.runtime, cursorStorage: storage };
     const runtimes = new Map([[chainA, { ...harness, runtime }]]);

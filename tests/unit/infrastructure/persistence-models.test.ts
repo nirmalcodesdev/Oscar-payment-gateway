@@ -208,8 +208,11 @@ describe("persistence model contracts", () => {
     expect(payment.has("ix_payment_chain_token_status")).toBe(true);
     expect(payment.get("uq_payment_wallet_address")?.unique).toBe(true);
     expect(event.get("uq_on_chain_event_id")?.unique).toBe(true);
-    expect(event.get("uq_event_payment_claim")?.unique).toBe(true);
-    expect(event.get("uq_event_payment_claim")?.partialFilterExpression).toBeDefined();
+    // The claim index serves claim lookups; uniqueness is structural (a single
+    // scalar `matchedPaymentId` written only through conditional claims) so a
+    // payment may accumulate many claimed events (ADR 0011).
+    expect(event.get("ix_event_payment_claim")?.unique).toBeUndefined();
+    expect(event.get("ix_event_payment_claim")?.partialFilterExpression).toBeDefined();
     expect(event.has("ix_event_chain_contract_block")).toBe(true);
     expect(event.has("ix_event_chain_normalized_contract_block")).toBe(true);
     expect(wallet.get("uq_xpub_derivation_index")?.unique).toBe(true);

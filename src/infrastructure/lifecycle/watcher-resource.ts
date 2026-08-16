@@ -3,6 +3,10 @@ import type { Logger } from "pino";
 
 import type { RuntimeConfig } from "../../config/environment.js";
 import {
+  ReorgResolutionService,
+  type ReorgResolutionOutcome,
+} from "../../application/watcher/reorg-resolution-service.js";
+import {
   WatcherService,
   type RegistryChainRecord,
   type WatcherChainRuntime,
@@ -43,11 +47,20 @@ export class WatcherResource implements ManagedResource {
     const adapters = this.#adapters;
     const rpcConfig = options.config.rpc;
     const watcherConfig = options.config.watcher;
+    const reorgResolver = new ReorgResolutionService(
+      options.connection,
+      options.config.processing,
+      options.logger,
+    );
     this.#service = new WatcherService({
       connection: options.connection,
       config: options.config.watcher,
       ingestionClient: new SignedIngestionClient({ config: options.config.ingestion }),
       logger: options.logger,
+      reorgResolver: {
+        resolve: (runtime): Promise<ReorgResolutionOutcome> =>
+          reorgResolver.resolve(runtime),
+      },
       ...(options.logDecoder === undefined ? {} : { logDecoder: options.logDecoder }),
       runtimeFactory: {
         async create(chain: RegistryChainRecord): Promise<WatcherChainRuntime> {
