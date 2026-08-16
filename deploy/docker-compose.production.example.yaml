@@ -1,0 +1,74 @@
+# Production-like deployment template (ADR 0004/0010/0016).
+#
+# This is a TEMPLATE: real values come from a secrets manager; nothing here
+# is wired into CI. It exists to show the required topology:
+# - four independently scalable process types (scale: api/processor as
+#   needed; watcher and scheduler run with leases so extra replicas are
+#   safe but not required)
+# - internal-only backend network; the API is the only published service,
+#   behind a TLS-terminating reverse proxy (not shown)
+# - the internal ingestion endpoint is reachable ONLY inside the backend
+#   network (network policy); add mTLS at the proxy for defense in depth
+# - non-root containers, graceful termination (stop_grace_period covers
+#   in-flight transaction drain), resource guidance per service.
+name: oscar-payment-gateway-production-example
+
+x-application: &application
+  build:
+    context: ..
+    target: runtime
+  restart: unless-stopped
+  env_file:
+    - path: /run/secrets/oscar-env # secrets manager projection; never commit
+      required: false
+  networks:
+    - backend
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  stop_grace_period: 30s
+  # Resource guidance: size for peak; these are floors, not ceilings.
+  # API is I/O bound; processor is CPU-bound (scrypt-free but
+  # transaction-heavy); watcher is network-bound; scheduler is light.
+  deploy:
+    resources:
+      limits:
+        cpus: "2.0"
+        memory: 1G
+
+services:
+  api:
+    <<: *application
+    command: ["node", "dist/processes/api.js"]
+    # Publish NOTHING directly; the TLS reverse proxy (fronting this
+    # network) is the only ingress. Health checks drive rolling restarts.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  watcher:
+    <<: *application
+    command: ["node", "dist/processes/watcher.js"]
+    # Submits only to INTERNAL_INGESTION_BASE_URL over the backend network.
+  processor:
+    <<: *application
+    command: ["node", "dist/processes/processor.js"]
+    # Safe to scale horizontally: deterministic job ids + conditional
+    # writes are the correctness boundary (scale: N).
+  scheduler:
+    <<: *application
+    command: ["node", "dist/processes/scheduler.js"]
+    # Redis leases make overlapping schedulers safe; one is sufficient.
+
+networks:
+  backend:
+    internal: true # no egress except what proxies explicitly allow;
+    # webhook egress and RPC egress require an egress proxy/firewall
+    # allowing only operator-approved destinations (see SECURITY.md).
