@@ -7,6 +7,7 @@ import { PaymentMatchingService } from "../application/processing/payment-matchi
 import { PaymentConfirmationService } from "../application/processing/payment-confirmation-service.js";
 import { SchedulerService } from "../application/scheduler/scheduler-service.js";
 import { loadConfig, type ProcessName } from "../config/environment.js";
+import { ApplicationError } from "../domain/errors/application-error.js";
 import { EvmBalanceDeltaReader } from "../infrastructure/chain/evm-balance-delta-reader.js";
 import { EvmConfirmationReader } from "../infrastructure/chain/evm-confirmation-reader.js";
 import {
@@ -14,6 +15,7 @@ import {
   type ResolvedProviderClient,
 } from "../infrastructure/chain/evm-chain-adapter.js";
 import { UpdateableSanctionsListProvider } from "../infrastructure/compliance/updateable-list-provider.js";
+import { buildOperationalEndpoints } from "../infrastructure/observability/operational-endpoints.js";
 import { EnabledRegistryReader } from "../application/registry/registry-reader.js";
 import { LifecycleManager } from "../infrastructure/lifecycle/lifecycle-manager.js";
 import type { ManagedResource } from "../infrastructure/lifecycle/managed-resource.js";
@@ -33,6 +35,7 @@ import {
 } from "../infrastructure/queue/webhook-delivery-queue.js";
 import { JobLease } from "../infrastructure/redis/job-lease.js";
 import { PaymentLock } from "../infrastructure/redis/payment-lock.js";
+import { RedisRateLimiter } from "../infrastructure/auth/rate-limiter.js";
 import { RedisResource } from "../infrastructure/redis/redis-resource.js";
 import { createApp } from "../interfaces/http/create-app.js";
 import { createAdminRegistryRouter } from "../interfaces/http/admin-registry-router.js";
@@ -245,10 +248,38 @@ function createRuntime(processName: ProcessName): Runtime {
     webhookDispatcher: webhookDispatchQueue,
   });
   const eventQueue = new EventQueueResource(redis.client, config.redis.queuePrefix);
+  const ingestionLimiter = new RedisRateLimiter(redis.client);
   const internalEventsRouter = createInternalEventsRouter({
     connection: mongo.connection,
     config,
     queue: eventQueue.queue,
+    ingestionRateLimit: (request, _response, next) => {
+      const remoteAddress = request.socket.remoteAddress ?? "unknown";
+      ingestionLimiter
+        .consume(
+          `oscar:rate:ingestion:${remoteAddress}`,
+          config.http.rateLimitIngestionPerMinute,
+          60,
+        )
+        .then((decision) => {
+          if (!decision.allowed) {
+            next(
+              new ApplicationError("RATE_LIMITED", "Too many requests", 429, {
+                retryAfterSec: decision.retryAfterSec,
+              }),
+            );
+            return;
+          }
+          next();
+        })
+        .catch((error: unknown) => {
+          logger.error(
+            { err: error },
+            "Ingestion rate limiter unavailable; failing closed to HMAC",
+          );
+          next();
+        });
+    },
   });
   const app = createApp(logger, new ResourceReadinessProbe(dependencies, logger), {
     apiRouters: [
@@ -259,6 +290,18 @@ function createRuntime(processName: ProcessName): Runtime {
       reconciliationRouter,
       internalEventsRouter,
     ],
+    security: {
+      corsAllowedOrigins: config.http.corsAllowedOrigins,
+      ...(config.http.trustProxyHops === undefined
+        ? {}
+        : { trustProxyHops: config.http.trustProxyHops }),
+    },
+    operational: buildOperationalEndpoints(
+      mongo.connection,
+      redis.client,
+      config,
+      logger,
+    ),
   });
   const httpServer = new HttpServerResource(app, config.api);
   return {

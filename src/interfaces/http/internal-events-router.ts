@@ -87,6 +87,8 @@ export interface InternalEventsRouterDependencies {
   readonly connection: Connection;
   readonly config: RuntimeConfig;
   readonly queue: EventEnqueuer;
+  /** Redis-backed per-IP ingestion limiter (ADR 0016 class policy). */
+  readonly ingestionRateLimit?: RequestHandler;
 }
 
 /**
@@ -164,6 +166,9 @@ export function createInternalEventsRouter(
     });
   };
 
+  if (dependencies.ingestionRateLimit !== undefined) {
+    router.use(dependencies.ingestionRateLimit);
+  }
   router.post(
     "/internal/on-chain-events",
     verifyHmac,

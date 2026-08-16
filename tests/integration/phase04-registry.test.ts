@@ -101,6 +101,10 @@ describeWithServices("Phase 04 live registry administration", () => {
     });
     await connection.asPromise();
     models = registerPersistenceModels(connection);
+    // The suite registers its own chain on the fixed mock network id; clear
+    // any leftover chain with that id so the unique network index cannot
+    // conflict across runs (later suites re-create their shared fixture).
+    await models.Chain.collection.deleteMany({ networkChainId: 11155111 });
     for (let index = 0; index < adminIds.length; index += 1) {
       await models.AdminIdentity.create({
         adminId: adminIds[index],
