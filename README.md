@@ -110,11 +110,14 @@ the Phase 03 route contracts are documented in `docs/AUTHENTICATION.md`.
 
 ## Chain and token registry
 
-Phase 04 adds the admin-only, audited chain and ERC-20 registry. Entries are
+Phase 04 adds the admin-only, audited chain and token registry. Entries are
 created disabled and activated only after live verification through the
 operator-configured `RPC_PROVIDER_CATALOG`; administrators submit provider IDs,
-never RPC URLs. Configure at least two providers operated independently for
-each chain. The registry never stores or returns endpoint credentials. See
+never RPC URLs. A token's `assetType` is either `erc20` (a deployed contract)
+or `native` (the chain's gas coin); native entries omit the contract address and
+carry the chain's `nativeCurrency` symbol and decimals. Configure at least two
+providers operated independently for each chain, and at most one native token per
+chain. The registry never stores or returns endpoint credentials. See
 `docs/REGISTRY.md` for lifecycle, manual-review, deactivation, and migration
 procedures.
 
@@ -262,13 +265,16 @@ npm run verify:ci-negative-controls
 
 ## Limitations and v1 exclusions
 
-Single EVM family; no sweeps/refunds/signing (future HSM/MPC component);
-screening is the fail-closed static-list fallback plus admin-managed lists
-(integrate a real provider before real funds); webhook egress requires the
-documented SSRF controls; fiat rails, tax reporting, and custody are out of
-scope. All twelve implementation phases are complete with validation
-evidence; real-funds production use remains blocked until the human release
-gates in `docs/RELEASE_SIGNOFF.md` (qualified legal/compliance review,
+Single EVM family; native-asset deposits are top-level value transfers only —
+value moved to a watched address by an internal contract call is not detected
+and surfaces in reconciliation for manual review (use `balance_delta_required`
+for high-value native tokens); no sweeps/refunds/signing (future HSM/MPC
+component); screening is the fail-closed static-list fallback plus
+admin-managed lists (integrate a real provider before real funds); webhook
+egress requires the documented SSRF controls; fiat rails, tax reporting, and
+custody are out of scope. All implementation phases are complete with
+validation evidence; real-funds production use remains blocked until the human
+release gates in `docs/RELEASE_SIGNOFF.md` (qualified legal/compliance review,
 operator release approval, public-testnet verification, independent
 threat-model review, and a live alert paging test) are recorded.
 

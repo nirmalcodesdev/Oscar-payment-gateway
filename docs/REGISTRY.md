@@ -1,8 +1,19 @@
 # Chain and Token Registry Operations
 
-Phase 04 provides an admin-only registry for the chains and ERC-20 tokens that
-the gateway is allowed to use. Registry entries are platform configuration;
+Phase 04 provides an admin-only registry for the chains and instruments the
+gateway accepts payments in. Registry entries are platform configuration;
 merchants cannot create, edit, activate, or disable them.
+
+## Instruments
+
+A token's `assetType` is `erc20` (a deployed contract) or `native` (the
+chain's gas coin, e.g. ETH/POL/BNB). `POST /api/v1/admin/tokens` defaults
+to `erc20`; a native entry is created without a contract address and with its
+`symbol` and `decimals` taken from the parent chain's `nativeCurrency`. There is
+at most one native token per chain. Native activation verifies the chain's
+numeric identity through the selected providers and cross-checks the decimals
+against the chain metadata; there is no contract to read, so `manual_review`
+does not apply to native tokens.
 
 ## Provider catalog
 
