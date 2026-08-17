@@ -71,7 +71,7 @@ export class UpdateableSanctionsListProvider implements SanctionsScreeningProvid
     const list = await this.#models.SanctionsList.findOne({ status: "active" })
       .select({ listVersion: 1 })
       .lean();
-    return list?.listVersion;
+    return list?.listVersion ?? this.#fallback.listVersion;
   }
 
   public async screen(request: ScreeningRequest): Promise<ScreeningResult> {
