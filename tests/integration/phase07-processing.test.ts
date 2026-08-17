@@ -83,7 +83,7 @@ describeWithMongo("Phase 07 payment processing", () => {
     });
     await connection.asPromise();
     models = registerPersistenceModels(connection);
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(6);
     // Hermetic suite: unexpired screening cache records from other runs must
     // not leak into the scripted screening assertions.
     await models.ComplianceScreening.collection.deleteMany({});
@@ -937,6 +937,7 @@ describeWithMongo("Phase 07 payment processing", () => {
               : Promise.resolve(found);
           },
           getLogs: () => Promise.resolve([]),
+          getBlockTransactions: () => Promise.resolve([]),
         },
         corroborator: {
           corroborateBlockHeader: () => Promise.resolve(corroboration),

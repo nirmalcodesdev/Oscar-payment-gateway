@@ -39,7 +39,7 @@ export class EvmBalanceDeltaReader implements BalanceDeltaReader {
 
   public async readDelta(input: {
     readonly chain: string;
-    readonly contractAddress: string;
+    readonly contractAddress?: string;
     readonly holder: string;
     readonly blockNumber: number;
   }): Promise<BalanceDeltaRead> {
@@ -48,10 +48,8 @@ export class EvmBalanceDeltaReader implements BalanceDeltaReader {
       return { status: "unavailable" };
     }
 
-    let contract: Address;
     let holder: Address;
     try {
-      contract = getAddress(input.contractAddress);
       holder = getAddress(input.holder);
     } catch {
       return { status: "unavailable" };
@@ -62,19 +60,26 @@ export class EvmBalanceDeltaReader implements BalanceDeltaReader {
       return { status: "unavailable" };
     }
 
+    let contract: Address | undefined;
+    if (input.contractAddress !== undefined) {
+      try {
+        contract = getAddress(input.contractAddress);
+      } catch {
+        return { status: "unavailable" };
+      }
+    }
+
     const deltas: bigint[] = [];
     for (const provider of providers) {
       try {
-        const before = await provider.client.readErc20Balance(
-          contract,
-          holder,
-          beforeBlock,
-        );
-        const after = await provider.client.readErc20Balance(
-          contract,
-          holder,
-          transferBlock,
-        );
+        const before =
+          contract === undefined
+            ? await provider.client.readNativeBalance(holder, beforeBlock)
+            : await provider.client.readErc20Balance(contract, holder, beforeBlock);
+        const after =
+          contract === undefined
+            ? await provider.client.readNativeBalance(holder, transferBlock)
+            : await provider.client.readErc20Balance(contract, holder, transferBlock);
         deltas.push(after - before);
       } catch (error: unknown) {
         this.#logger.warn(

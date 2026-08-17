@@ -54,14 +54,38 @@ function storedEvent(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function nativeRawEvent(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    hash: "0x11",
+    from: fromAddress,
+    to: toAddress,
+    value: "900",
+    ...overrides,
+  };
+}
+
+function nativeStoredEvent(overrides: Partial<Record<string, unknown>> = {}) {
+  return storedEvent({
+    assetType: "native",
+    contractAddress: undefined,
+    normalizedContractAddress: undefined,
+    logIndex: undefined,
+    amount: "900",
+    rawEvent: nativeRawEvent(),
+    ...overrides,
+  });
+}
+
 interface RegistryOptions {
   readonly chains?: readonly string[];
   readonly tokens?: {
     readonly chain: string;
-    readonly normalizedContractAddress: string;
+    readonly assetType?: "erc20" | "native";
+    readonly normalizedContractAddress?: string;
     readonly tokenId?: string;
     readonly verificationPolicy?: "event_only" | "balance_delta_required";
   }[];
+  readonly walletAddress?: string;
 }
 
 function registryReader(options: RegistryOptions = {}): EnabledRegistryReader {
@@ -81,8 +105,12 @@ function registryReader(options: RegistryOptions = {}): EnabledRegistryReader {
     ).map((token) => ({
       tokenId: token.tokenId ?? "token-usdc-sepolia",
       chain: token.chain,
-      normalizedContractAddress: token.normalizedContractAddress,
+      assetType: token.assetType ?? ("erc20" as const),
+      symbol: "USDC",
       verificationPolicy: token.verificationPolicy ?? ("event_only" as const),
+      ...(token.normalizedContractAddress === undefined
+        ? {}
+        : { normalizedContractAddress: token.normalizedContractAddress }),
     })),
   };
   return {
@@ -453,6 +481,64 @@ describe("EventInterpretationService judgment tables", () => {
     await expect(interpreter.interpret("event_missing", logger)).rejects.toThrow(
       "event_missing",
     );
+  });
+
+  it("accepts a native value transfer against the native token", async () => {
+    const { connection, events } = fakeConnection({ events: [nativeStoredEvent()] });
+    const deltas = deltaReader({ status: "unavailable" });
+    const interpreter = service(
+      connection,
+      deltas.reader,
+      registryReader({
+        tokens: [{ chain, assetType: "native", tokenId: "token-native" }],
+      }),
+    );
+
+    const outcome = await interpreter.interpret("event_test", logger);
+    expect(outcome).toMatchObject({ status: "accepted" });
+    expect(deltas.calls).toEqual([]);
+    expect(events.get("event_test")).toMatchObject({
+      interpretationStatus: "accepted",
+      token: "token-native",
+    });
+  });
+
+  it("rejects a native event whose amount is zero", async () => {
+    const { connection } = fakeConnection({
+      events: [
+        nativeStoredEvent({ amount: "0", rawEvent: nativeRawEvent({ value: "0" }) }),
+      ],
+    });
+    const deltas = deltaReader({ status: "unavailable" });
+    const interpreter = service(
+      connection,
+      deltas.reader,
+      registryReader({
+        tokens: [{ chain, assetType: "native", tokenId: "token-native" }],
+      }),
+    );
+
+    const outcome = await interpreter.interpret("event_test", logger);
+    expect(outcome).toMatchObject({
+      status: "rejected",
+      reason: "nonzero_value_missing",
+    });
+  });
+
+  it("rejects a native event for a chain with no native token", async () => {
+    const { connection } = fakeConnection({ events: [nativeStoredEvent()] });
+    const deltas = deltaReader({ status: "unavailable" });
+    const interpreter = service(
+      connection,
+      deltas.reader,
+      registryReader({ tokens: [] }),
+    );
+
+    const outcome = await interpreter.interpret("event_test", logger);
+    expect(outcome).toMatchObject({
+      status: "rejected",
+      reason: "unknown_or_disabled_token",
+    });
   });
 });
 

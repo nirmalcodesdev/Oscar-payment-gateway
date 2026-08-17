@@ -90,4 +90,15 @@ describe("buildEip681Uri", () => {
       }),
     ).toContain(`uint256=${maxUint256.toString(10)}`);
   });
+
+  it("builds the token-less native form for native assets (ADR 0018)", () => {
+    expect(
+      buildEip681Uri({
+        networkChainId: 137,
+        assetType: "native",
+        recipientAddress,
+        amount: "5000000000000000000",
+      }),
+    ).toBe(`ethereum:${recipientAddress}@137?value=5000000000000000000`);
+  });
 });

@@ -29,11 +29,12 @@ export class IngestionClientError extends Error {
 
 interface IngestionBody {
   readonly chain: string;
+  readonly assetType?: "erc20" | "native";
   readonly transactionHash: string;
-  readonly logIndex: number;
+  readonly logIndex?: number;
   readonly blockNumber: number;
   readonly blockHash: string;
-  readonly contractAddress: string;
+  readonly contractAddress?: string;
   readonly fromAddress: string;
   readonly toAddress: string;
   readonly amount: string;
@@ -63,11 +64,14 @@ export class SignedIngestionClient implements IngestionClient {
   public async submitEvent(event: OnChainDepositEvent): Promise<IngestionSubmitResult> {
     const body: IngestionBody = {
       chain: event.chain,
+      ...(event.assetType === "native" ? { assetType: "native" as const } : {}),
       transactionHash: event.transactionHash,
-      logIndex: event.logIndex,
+      ...(event.logIndex === undefined ? {} : { logIndex: event.logIndex }),
       blockNumber: event.blockNumber,
       blockHash: event.blockHash,
-      contractAddress: event.contractAddress,
+      ...(event.contractAddress === undefined
+        ? {}
+        : { contractAddress: event.contractAddress }),
       fromAddress: event.fromAddress,
       toAddress: event.toAddress,
       amount: event.amount,

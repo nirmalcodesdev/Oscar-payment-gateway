@@ -79,8 +79,9 @@ function safeChainProjection(chain: {
 function safeTokenProjection(token: {
   tokenId: string;
   chain: string;
+  assetType: string;
   symbol: string;
-  contractAddress: string;
+  contractAddress?: string | null;
   decimals: number;
   minAmount: string;
   maxAmount: string;
@@ -96,8 +97,11 @@ function safeTokenProjection(token: {
   return {
     tokenId: token.tokenId,
     chain: token.chain,
+    assetType: token.assetType,
     symbol: token.symbol,
-    contractAddress: token.contractAddress,
+    ...(token.contractAddress == null
+      ? {}
+      : { contractAddress: token.contractAddress }),
     decimals: token.decimals,
     minAmount: token.minAmount,
     maxAmount: token.maxAmount,
@@ -146,8 +150,9 @@ export interface UpdateChainInput {
 export interface CreateTokenInput {
   readonly tokenId: string;
   readonly chain: string;
+  readonly assetType: "erc20" | "native";
   readonly symbol: string;
-  readonly contractAddress: string;
+  readonly contractAddress?: string | undefined;
   readonly decimals: number;
   readonly minAmount: string;
   readonly maxAmount: string;
@@ -398,14 +403,37 @@ export class RegistryService {
 
   public async createToken(actor: AdminPrincipal, input: CreateTokenInput) {
     assertAmountRange(input.minAmount, input.maxAmount);
-    let contractAddress: string;
-    try {
-      contractAddress = getAddress(input.contractAddress);
-    } catch {
-      throw invalid("Token contract address is invalid");
-    }
     const parent = await this.#models.Chain.findOne({ chainId: input.chain }).lean();
     if (parent === null) throw invalid("Token chain is not registered");
+    const isNative = input.assetType === "native";
+    let contractAddress: string | undefined;
+    if (isNative) {
+      if (input.contractAddress !== undefined) {
+        throw invalid("Native tokens must not carry a contract address");
+      }
+      if (
+        input.symbol.trim().toUpperCase() !==
+        parent.nativeCurrency.symbol.trim().toUpperCase()
+      ) {
+        throw invalid(
+          "Native token symbol must match the parent chain native currency",
+        );
+      }
+      if (input.decimals !== parent.nativeCurrency.decimals) {
+        throw invalid(
+          "Native token decimals must match the parent chain native currency",
+        );
+      }
+    } else {
+      if (input.contractAddress === undefined) {
+        throw invalid("ERC-20 tokens require a contract address");
+      }
+      try {
+        contractAddress = getAddress(input.contractAddress);
+      } catch {
+        throw invalid("Token contract address is invalid");
+      }
+    }
     try {
       return await withRequiredTransaction(this.#connection, async (session) => {
         const [token] = await this.#models.Token.create(
@@ -413,9 +441,14 @@ export class RegistryService {
             {
               tokenId: input.tokenId,
               chain: input.chain,
+              assetType: input.assetType,
               symbol: input.symbol,
-              contractAddress,
-              normalizedContractAddress: contractAddress.toLowerCase(),
+              ...(contractAddress === undefined
+                ? {}
+                : {
+                    contractAddress,
+                    normalizedContractAddress: contractAddress.toLowerCase(),
+                  }),
               decimals: input.decimals,
               minAmount: input.minAmount,
               maxAmount: input.maxAmount,
@@ -466,14 +499,21 @@ export class RegistryService {
     assertAmountRange(minAmount, maxAmount);
     if (before.enabled) {
       const chain = await this.#requireVerifiedEnabledChain(before.chain);
-      const verification = await this.#verifyToken({
-        networkChainId: chain.networkChainId,
-        providerReferences: chain.rpcProviders,
-        contractAddress: before.contractAddress,
-        decimals: before.decimals,
-        symbol: before.symbol,
-      });
-      if (verification.classification !== "verified") throw verificationFailed();
+      if (before.assetType === "native") {
+        await this.#verifyChain(chain.networkChainId, chain.rpcProviders);
+      } else {
+        if (before.contractAddress === undefined || before.contractAddress === null) {
+          throw invalid("Token contract address is unavailable");
+        }
+        const verification = await this.#verifyToken({
+          networkChainId: chain.networkChainId,
+          providerReferences: chain.rpcProviders,
+          contractAddress: before.contractAddress,
+          decimals: before.decimals,
+          symbol: before.symbol,
+        });
+        if (verification.classification !== "verified") throw verificationFailed();
+      }
     }
     return withRequiredTransaction(this.#connection, async (session) => {
       const updated = await this.#models.Token.findOneAndUpdate(
@@ -533,6 +573,12 @@ export class RegistryService {
       .sort({ tokenId: 1 })
       .lean();
     for (const token of tokens) {
+      // Native tokens activate only after their parent chain is enabled (ADR 0018),
+      // so none exist here yet; guard anyway for correctness.
+      if (token.assetType === "native") continue;
+      if (token.contractAddress === undefined || token.contractAddress === null) {
+        throw verificationFailed();
+      }
       const verification = await this.#verifyToken({
         networkChainId,
         providerReferences,
@@ -551,6 +597,28 @@ export class RegistryService {
     }
   }
 
+  /**
+   * Full verification of a native token against its parent chain (ADR 0018):
+   * re-Verify the chain identity through all selected providers and cross-check
+   * the stored decimals against the chain's `nativeCurrency.decimals`. There is no
+   * contract to call; ERC-20-only verifications bail out here.
+   */
+  async #verifyNativeToken(before: {
+    readonly chain: string;
+    readonly decimals: number;
+  }): Promise<void> {
+    const chain = await this.#requireVerifiedEnabledChain(before.chain);
+    await this.#verifyChain(chain.networkChainId, chain.rpcProviders);
+    const nativeDecimals = await this.#models.Chain.findOne({
+      chainId: before.chain,
+    })
+      .select({ "nativeCurrency.decimals": 1 })
+      .lean();
+    if (nativeDecimals?.nativeCurrency.decimals !== before.decimals) {
+      throw invalid("Native token decimals mismatch the parent chain");
+    }
+  }
+
   public async activateToken(
     actor: AdminPrincipal,
     tokenId: string,
@@ -563,7 +631,50 @@ export class RegistryService {
       enabled: false,
     }).lean();
     if (before === null) throw notFound();
+
+    if (before.assetType === "native") {
+      await this.#verifyNativeToken(before);
+      return withRequiredTransaction(this.#connection, async (session) => {
+        const updated = await this.#models.Token.findOneAndUpdate(
+          { tokenId, version: expectedVersion, enabled: false },
+          {
+            $set: {
+              enabled: true,
+              verificationStatus: "verified",
+              verifiedAt: new Date(),
+              verifiedSymbol: before.symbol,
+              verifiedDecimals: before.decimals,
+            },
+            $inc: { version: 1 },
+          },
+          { new: true, session, runValidators: true },
+        ).lean();
+        if (updated === null) {
+          throw conflict("Token configuration changed concurrently");
+        }
+        const result = safeTokenProjection(updated);
+        await appendAuditEntryInTransaction(
+          this.#connection,
+          {
+            scope: "platform",
+            entityType: "Token",
+            entityId: tokenId,
+            action: "token_activated",
+            actorType: "admin",
+            actorId: actor.adminId,
+            before: safeTokenProjection(before),
+            after: result,
+          },
+          session,
+        );
+        return result;
+      });
+    }
+
     const chain = await this.#requireVerifiedEnabledChain(before.chain);
+    if (before.contractAddress === undefined || before.contractAddress === null) {
+      throw invalid("Token contract address is unavailable");
+    }
     const verification = await this.#verifyToken({
       networkChainId: chain.networkChainId,
       providerReferences: chain.rpcProviders,
@@ -776,12 +887,14 @@ export class RegistryService {
 export interface PaymentRegistrySnapshot {
   readonly chainId: string;
   readonly tokenId: string;
+  readonly tokenAssetType: "erc20" | "native";
   readonly requiredConfirmations: number;
   readonly tokenVerificationPolicy: VerificationPolicy;
   readonly chainConfigurationVersion: number;
   readonly tokenConfigurationVersion: number;
   readonly networkChainId: number;
-  readonly tokenContractAddress: string;
+  /** Absent for native tokens (ADR 0018). */
+  readonly tokenContractAddress?: string;
   readonly tokenMinAmount: string;
   readonly tokenMaxAmount: string;
 }
@@ -819,12 +932,15 @@ export class RegistrySnapshotRepository {
     return {
       chainId,
       tokenId,
+      tokenAssetType: token.assetType,
       requiredConfirmations: chain.requiredConfirmations,
       tokenVerificationPolicy: token.verificationPolicy as VerificationPolicy,
       chainConfigurationVersion: chain.version,
       tokenConfigurationVersion: token.version,
       networkChainId: chain.networkChainId,
-      tokenContractAddress: token.contractAddress,
+      ...(token.contractAddress === undefined || token.contractAddress === null
+        ? {}
+        : { tokenContractAddress: token.contractAddress }),
       tokenMinAmount: token.minAmount,
       tokenMaxAmount: token.maxAmount,
     };

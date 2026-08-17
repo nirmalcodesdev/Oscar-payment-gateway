@@ -9,9 +9,13 @@
 export interface OnChainDepositEvent {
   /** Registry chain identity (`Chain.chainId`), never a numeric network id. */
   readonly chain: string;
-  readonly contractAddress: string;
+  /** Instrument kind: ERC-20 transfer log or native value transfer (ADR 0018). */
+  readonly assetType: "erc20" | "native";
+  /** Absent for native transfers (no contract). */
+  readonly contractAddress?: string;
   readonly transactionHash: string;
-  readonly logIndex: number;
+  /** Absent for native transfers (a top-level value transfer has no log). */
+  readonly logIndex?: number;
   readonly blockNumber: number;
   readonly blockHash: string;
   readonly fromAddress: string;
@@ -64,6 +68,15 @@ export interface ChainObservationPort {
   getCurrentBlock(): Promise<number>;
   getBlockHeader(blockNumber: number): Promise<ObservedBlockHeader>;
   getLogs(filter: ChainLogFilter): Promise<readonly ChainLogEntry[]>;
+  /** Native value-transfer candidates for a block (ADR 0018). */
+  getBlockTransactions(blockNumber: number): Promise<
+    readonly {
+      readonly hash: string;
+      readonly from: string;
+      readonly to?: string | null;
+      readonly value: bigint;
+    }[]
+  >;
 }
 
 /** Result of a corroborated recipient balance delta read (ADR 0010). */
@@ -82,7 +95,8 @@ export interface BalanceDeltaRead {
 export interface BalanceDeltaReader {
   readDelta(input: {
     readonly chain: string;
-    readonly contractAddress: string;
+    /** Omit for native assets, whose balance is the account's own coin balance. */
+    readonly contractAddress?: string;
     readonly holder: string;
     readonly blockNumber: number;
   }): Promise<BalanceDeltaRead>;
