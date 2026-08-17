@@ -18,3 +18,9 @@ Thumbs.db
 .compose.override.yml
 
 .admin-token
+
+.webhook-secret.txt
+.webhook-receiver.mjs
+.webhook-received.log
+
+.live-evidence.json
