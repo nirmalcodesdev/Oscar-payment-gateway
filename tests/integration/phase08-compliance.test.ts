@@ -73,7 +73,7 @@ describeWithMongo("Phase 08 compliance controls", () => {
     });
     await connection.asPromise();
     models = registerPersistenceModels(connection);
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(6);
     // Hermetic suite: prior runs (and the live router tests) leave active
     // lists and unexpired screening cache records that must not leak in.
     await models.SanctionsList.collection.deleteMany({});

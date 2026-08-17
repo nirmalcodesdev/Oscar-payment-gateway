@@ -34,6 +34,20 @@ const immutableAddress = immutableString({ match: evmAddressPattern });
 const immutableNormalizedAddress = immutableString({
   match: normalizedEvmAddressPattern,
 });
+// Native-asset records carry no contract address; ERC-20 records require one
+// (ADR 0018). Immutable once written, like every raw capture field.
+const immutableOptionalAddress = {
+  type: String,
+  immutable: true,
+  required: false,
+  match: evmAddressPattern,
+};
+const immutableOptionalNormalizedAddress = {
+  type: String,
+  immutable: true,
+  required: false,
+  match: normalizedEvmAddressPattern,
+};
 
 export const merchantSchema = new Schema(
   {
@@ -302,6 +316,13 @@ export const tokenSchema = new Schema(
   {
     tokenId: immutableIdentifier,
     chain: immutableReference("Chain"),
+    assetType: {
+      type: String,
+      required: true,
+      immutable: true,
+      enum: ["erc20", "native"],
+      default: "erc20",
+    },
     symbol: {
       type: String,
       required: true,
@@ -309,8 +330,18 @@ export const tokenSchema = new Schema(
       uppercase: true,
       maxlength: 32,
     },
-    contractAddress: immutableAddress,
-    normalizedContractAddress: immutableNormalizedAddress,
+    contractAddress: {
+      ...immutableOptionalAddress,
+      required: function isErc20Contract(this: { assetType?: string }) {
+        return this.assetType === "erc20";
+      },
+    },
+    normalizedContractAddress: {
+      ...immutableOptionalNormalizedAddress,
+      required: function isErc20Contract(this: { assetType?: string }) {
+        return this.assetType === "erc20";
+      },
+    },
     decimals: { type: Number, required: true, min: 0, max: 255 },
     minAmount: requiredPositiveAmount,
     maxAmount: requiredPositiveAmount,
@@ -341,8 +372,20 @@ tokenSchema.index(
   { unique: true, name: "uq_chain_token_symbol" },
 );
 tokenSchema.index(
+  { chain: 1, assetType: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { assetType: "native" },
+    name: "uq_chain_native_asset",
+  },
+);
+tokenSchema.index(
   { chain: 1, normalizedContractAddress: 1 },
-  { unique: true, name: "uq_chain_token_contract" },
+  {
+    unique: true,
+    partialFilterExpression: { normalizedContractAddress: { $type: "string" } },
+    name: "uq_chain_token_contract",
+  },
 );
 tokenSchema.index({ chain: 1, enabled: 1 }, { name: "ix_chain_token_enabled" });
 rejectDeletes(tokenSchema, "Token");
@@ -351,6 +394,13 @@ export const onChainEventSchema = new Schema(
   {
     eventId: immutableIdentifier,
     chain: immutableReference("Chain"),
+    assetType: {
+      type: String,
+      required: true,
+      immutable: true,
+      enum: ["erc20", "native"],
+      default: "erc20",
+    },
     // Resolved during interpretation (ADR 0010), not captured at ingest, so it
     // is mutable; raw capture fields remain immutable.
     token: {
@@ -359,10 +409,32 @@ export const onChainEventSchema = new Schema(
       maxlength: 128,
       ref: "Token",
     },
-    contractAddress: immutableAddress,
-    normalizedContractAddress: immutableNormalizedAddress,
+    contractAddress: {
+      ...immutableOptionalAddress,
+      required: function isErc20Contract(this: { assetType?: string }) {
+        return this.assetType === "erc20";
+      },
+    },
+    normalizedContractAddress: {
+      ...immutableOptionalNormalizedAddress,
+      required: function isErc20Contract(this: { assetType?: string }) {
+        return this.assetType === "erc20";
+      },
+    },
     transactionHash: immutableString({ match: transactionHashPattern }),
-    logIndex: immutableBoundedCounter,
+    // Native value transfers have no log; they store `logIndex: null` (a
+    // top-level transfer has no log index) so the native exactly-once partial
+    // unique index on `{ chain, transactionHash }` scoped to null log indexes
+    // applies (ADR 0018). ERC-20 events require a numeric log index.
+    logIndex: {
+      type: Number,
+      immutable: true,
+      required: function isErc20LogIndex(this: { assetType?: string }) {
+        return this.assetType === "erc20";
+      },
+      min: 0,
+      max: Number.MAX_SAFE_INTEGER,
+    },
     blockNumber: immutableBoundedCounter,
     blockHash: immutableString({ match: blockHashPattern }),
     fromAddress: immutableAddress,
@@ -396,7 +468,19 @@ onChainEventSchema.index(
 );
 onChainEventSchema.index(
   { chain: 1, transactionHash: 1, logIndex: 1 },
-  { unique: true, name: "uq_chain_transaction_log" },
+  {
+    unique: true,
+    partialFilterExpression: { logIndex: { $type: "number" } },
+    name: "uq_chain_transaction_log",
+  },
+);
+onChainEventSchema.index(
+  { chain: 1, transactionHash: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { logIndex: { $type: "null" } },
+    name: "uq_chain_native_transaction",
+  },
 );
 onChainEventSchema.index(
   { matchedPaymentId: 1 },

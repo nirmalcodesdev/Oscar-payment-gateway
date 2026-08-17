@@ -82,6 +82,7 @@ function token(overrides: Partial<RegistrySnapshot["tokens"][number]> = {}) {
   return {
     tokenId: "token-usdc-sepolia",
     chain: chainA,
+    assetType: "erc20" as const,
     symbol: "USDC",
     contractAddress: "0xABCD111111111111111111111111111111111111",
     normalizedContractAddress: contractA,
@@ -230,6 +231,7 @@ function fakeChainRuntime(chainId: string) {
             filter.contractAddresses.includes(entry.contractAddress),
         ),
       ),
+    getBlockTransactions: () => Promise.resolve([]),
   };
 
   const cursorStorage: ChainCursorStorage = {

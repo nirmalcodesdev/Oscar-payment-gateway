@@ -136,7 +136,22 @@ export async function runDatabaseMigrations(connection: Connection): Promise<num
       metadata = await metadataCollection.findOne({ _id: "current" });
     }
 
-    return currentVersion;
+    // A previously interrupted run can leave the `version` field behind the
+    // applied migrations array (the array is the authoritative record); repair the
+    // field so the compatibility check and callers agree on the settled version.
+    const appliedMax =
+      metadata?.migrations.reduce(
+        (highest, item) => Math.max(highest, item.version),
+        0,
+      ) ?? 0;
+    const settled = Math.max(appliedMax, currentVersion);
+    if (metadata !== null && metadata.version !== settled) {
+      await metadataCollection.updateOne(
+        { _id: "current", version: metadata.version },
+        { $set: { version: settled } },
+      );
+    }
+    return settled;
   } finally {
     await leases.deleteOne({ _id: leaseId, owner });
   }

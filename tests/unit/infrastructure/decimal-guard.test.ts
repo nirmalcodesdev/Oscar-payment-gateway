@@ -33,8 +33,10 @@ function client(overrides: Partial<EvmProviderClient> = {}): EvmProviderClient {
     getLogs: () => Promise.resolve([]),
     getTransactionReceipt: () =>
       Promise.resolve({ blockNumber: 100, blockHash: `0x${"a".repeat(64)}` }),
+    getBlockTransactions: () => Promise.resolve([]),
     readErc20Balance: () => Promise.resolve(0n),
     readErc20Decimals: () => Promise.resolve(6),
+    readNativeBalance: () => Promise.resolve(0n),
     ...overrides,
   };
 }

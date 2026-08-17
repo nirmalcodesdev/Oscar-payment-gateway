@@ -104,6 +104,15 @@ describe("deriveEventId", () => {
       expect(variant).not.toBe(baseline);
     }
   });
+
+  it("identifies native value transfers by transaction hash alone", () => {
+    expect(deriveEventId(chain, transactionHash)).toBe(
+      `native_tx_${transactionHash.toLowerCase()}`,
+    );
+    expect(deriveEventId(chain, transactionHash)).not.toBe(
+      deriveEventId(chain, transactionHash, 0),
+    );
+  });
 });
 
 describe("EventIngestionService", () => {
@@ -134,6 +143,30 @@ describe("EventIngestionService", () => {
     expect(created[0]?.["ingestedAt"]).toBeInstanceOf(Date);
     expect(created[0]).not.toHaveProperty("confirmationsAtIngest");
     expect(enqueued).toEqual([eventId]);
+  });
+
+  it("persists a native event without contract address or log index", async () => {
+    const { connection, created } = fakeConnection();
+    const { queue, enqueued } = recordingQueue();
+    const service = new EventIngestionService(connection, queue);
+
+    const outcome = await service.ingest(
+      input({
+        assetType: "native",
+        contractAddress: undefined,
+        logIndex: undefined,
+        rawEvent: { from: "0x11", to: "0x22", value: "0" },
+      }),
+    );
+
+    expect(outcome.eventId).toBe(`native_tx_${transactionHash.toLowerCase()}`);
+    expect(created[0]).toMatchObject({
+      assetType: "native",
+      logIndex: null,
+    });
+    // Native events carry no contract address (ADR 0018).
+    expect(created[0]).not.toHaveProperty("contractAddress");
+    expect(enqueued).toHaveLength(1);
   });
 
   it("records confirmationsAtIngest only when provided", async () => {

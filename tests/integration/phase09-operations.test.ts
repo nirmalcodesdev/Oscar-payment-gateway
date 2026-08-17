@@ -114,7 +114,7 @@ describeWithMongo("Phase 09 webhooks, scheduler, and reconciliation", () => {
     });
     await connection.asPromise();
     models = registerPersistenceModels(connection);
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(6);
     // Hermetic suite: reconciliation views scan wide ranges, so leftovers
     // from earlier suites must not leak into assertions.
     await models.WebhookDelivery.collection.deleteMany({});

@@ -283,6 +283,7 @@ export class PaymentService {
       const expiresAt = new Date(now.getTime() + expirySec * 1000);
       const qrCodeData = buildEip681Uri({
         networkChainId: snapshot.networkChainId,
+        assetType: snapshot.tokenAssetType,
         contractAddress: snapshot.tokenContractAddress,
         recipientAddress,
         amount: input.amount,
@@ -435,7 +436,8 @@ export class PaymentService {
       recipientAddress: walletAddress.address,
       qrCodeData: buildEip681Uri({
         networkChainId: chain.networkChainId,
-        contractAddress: token.contractAddress,
+        assetType: token.assetType,
+        contractAddress: token.contractAddress ?? undefined,
         recipientAddress: walletAddress.address,
         amount: payment.amount,
       }),

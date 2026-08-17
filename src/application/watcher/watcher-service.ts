@@ -78,7 +78,11 @@ interface ChainWatchState {
   loop: Promise<void> | undefined;
   halted: boolean;
   retired: boolean;
+  // ERC-20 deposit contracts to filter `eth_getLogs` on.
   contracts: readonly string[];
+  // Whether at least one enabled native token exists on this chain (ADR 0018);
+  // drives the full-block value-transfer scan.
+  native: boolean;
   recipients: ReadonlySet<string>;
   excludedTokens: ReadonlyMap<string, string>;
 }
@@ -167,7 +171,7 @@ export class WatcherService {
       registryRevision: this.#registryRevision,
       enabledChainCount: this.#enabledChainCount,
       watchableChainCount: states.filter(
-        (state) => !state.halted && state.contracts.length > 0,
+        (state) => !state.halted && (state.contracts.length > 0 || state.native),
       ).length,
       haltedChains: states
         .filter((state) => state.halted)
@@ -263,6 +267,7 @@ export class WatcherService {
           halted: false,
           retired: false,
           contracts: [],
+          native: false,
           recipients: new Set<string>(),
           excludedTokens: new Map(),
         };
@@ -279,9 +284,18 @@ export class WatcherService {
 
     const excludedByChain = new Map<string, Map<string, string>>();
     const contractsByChain = new Map<string, string[]>();
+    const nativeByChain = new Map<string, boolean>();
     for (const token of snapshot.tokens) {
       const state = this.#chains.get(token.chain);
       if (state === undefined) continue;
+      // Native tokens have no contract to decimal-guard (ADR 0018); their
+      // watch set is derived from wallet recipients, not a contract address.
+      if (token.assetType === "native") {
+        this.#tokenVersions.set(token.tokenId, token.version);
+        nativeByChain.set(token.chain, true);
+        continue;
+      }
+      if (token.normalizedContractAddress === undefined) continue;
       const previouslyExcluded = state.excludedTokens.has(token.tokenId);
       const previousVersion = this.#tokenVersions.get(token.tokenId);
       const needsVerification =
@@ -314,6 +328,7 @@ export class WatcherService {
     for (const [chainId, state] of this.#chains) {
       if (!enabledChainIds.has(chainId)) continue;
       state.contracts = contractsByChain.get(chainId) ?? [];
+      state.native = nativeByChain.get(chainId) === true;
       state.recipients = recipientsByChain.get(chainId) ?? new Set<string>();
       state.excludedTokens = excludedByChain.get(chainId) ?? new Map();
     }
@@ -331,6 +346,11 @@ export class WatcherService {
     token: RegistrySnapshot["tokens"][number],
     registryRevision: string,
   ): Promise<string | undefined> {
+    // The caller guards native tokens and missing contracts; keep the defense
+    // so a malformed record degrades readably rather than throwing.
+    if (token.normalizedContractAddress === undefined) {
+      return "metadata_missing";
+    }
     let outcome: DecimalGuardOutcome;
     try {
       outcome = await state.runtime.decimalVerifier.verifyDecimals(
@@ -539,6 +559,7 @@ export class WatcherService {
         if (!state.recipients.has(decoded.toAddress.toLowerCase())) continue;
         await this.#ingestionClient.submitEvent({
           chain: runtime.chainId,
+          assetType: "erc20",
           contractAddress: entry.contractAddress,
           transactionHash: entry.transactionHash,
           logIndex: entry.logIndex,
@@ -549,6 +570,40 @@ export class WatcherService {
           amount: decoded.amount,
           rawEvent: entry.raw,
         });
+      }
+    }
+
+    // Native value-transfer scan (ADR 0018): only chains with an enabled native
+    // token fetch full blocks. A candidate is a top-level transaction to a watched
+    // recipient carrying a positive value; the verbatim transaction is the rawEvent.
+    if (state.native && state.recipients.size > 0) {
+      for (const header of headers) {
+        const transactions = await runtime.observation.getBlockTransactions(
+          header.blockNumber,
+        );
+        for (const tx of transactions) {
+          if (this.#stopping) return false;
+          if (tx.to === undefined || tx.to === null || tx.value <= 0n) continue;
+          if (!state.recipients.has(tx.to.toLowerCase())) continue;
+          await this.#ingestionClient.submitEvent({
+            chain: runtime.chainId,
+            assetType: "native",
+            transactionHash: tx.hash,
+            blockNumber: header.blockNumber,
+            blockHash: header.blockHash,
+            fromAddress: tx.from,
+            toAddress: tx.to,
+            amount: tx.value.toString(10),
+            rawEvent: {
+              hash: tx.hash,
+              from: tx.from,
+              to: tx.to,
+              value: tx.value.toString(),
+              blockNumber: header.blockNumber,
+              blockHash: header.blockHash,
+            },
+          });
+        }
       }
     }
 

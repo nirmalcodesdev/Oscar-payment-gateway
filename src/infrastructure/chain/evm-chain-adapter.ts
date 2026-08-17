@@ -267,6 +267,20 @@ export class EvmChainAdapter
     return this.#withFailover((client) => client.getLogs(filter));
   }
 
+  /** Native value-transfer candidates for a block (ADR 0018). */
+  public async getBlockTransactions(blockNumber: number): Promise<
+    readonly {
+      readonly hash: string;
+      readonly from: string;
+      readonly to?: string | null;
+      readonly value: bigint;
+    }[]
+  > {
+    return this.#withFailover((client) =>
+      client.getBlockTransactions(BigInt(blockNumber)),
+    );
+  }
+
   /**
    * Cross-check an observed header through a provider independent of the
    * active one (ADR 0009). Disagreement is explicit; if no independent
@@ -362,6 +376,7 @@ export class EvmChainAdapter
       if (decoded === undefined) continue;
       await callback({
         chain: this.chainId,
+        assetType: "erc20",
         contractAddress: entry.contractAddress,
         transactionHash: entry.transactionHash,
         logIndex: entry.logIndex,

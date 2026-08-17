@@ -95,7 +95,7 @@ describeWithMongo("Phase 02 persistence invariants", () => {
   });
 
   it("installs the migration exactly once and accepts the supported database version", async () => {
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(6);
     await expect(assertDatabaseCompatibility(connection)).resolves.toBeUndefined();
     const metadata = await requireDatabase(connection)
       .collection<{
@@ -104,8 +104,8 @@ describeWithMongo("Phase 02 persistence invariants", () => {
         migrations: unknown[];
       }>("schema_metadata")
       .findOne({ _id: "current" });
-    expect(metadata?.version).toBe(5);
-    expect(metadata?.migrations).toHaveLength(5);
+    expect(metadata?.version).toBe(6);
+    expect(metadata?.migrations).toHaveLength(6);
   });
 
   it("refuses an incompatible database schema version", async () => {

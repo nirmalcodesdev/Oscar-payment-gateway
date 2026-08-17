@@ -106,11 +106,11 @@ function eventInput(overrides: Partial<IngestEventInput> = {}): IngestEventInput
 
 function deltaKey(input: {
   readonly chain: string;
-  readonly contractAddress: string;
+  readonly contractAddress?: string;
   readonly holder: string;
   readonly blockNumber: number;
 }): string {
-  return `${input.chain}:${input.contractAddress}:${input.holder}:${input.blockNumber}`;
+  return `${input.chain}:${input.contractAddress ?? ""}:${input.holder}:${input.blockNumber}`;
 }
 
 function scriptableDeltaReader(
@@ -215,7 +215,7 @@ describeWithMongo("Phase 06 event ingestion and interpretation", () => {
     models = registerPersistenceModels(connection);
 
     await requireDatabase(connection).collection("migration_leases").deleteMany({});
-    await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+    await expect(runDatabaseMigrations(connection)).resolves.toBe(6);
     for (const model of Object.values(models)) {
       await model.collection.deleteMany({});
     }
@@ -301,11 +301,11 @@ describeWithMongo("Phase 06 event ingestion and interpretation", () => {
 
   describe("schema migration 0003", () => {
     it("is idempotent and settles the database at version 5", async () => {
-      await expect(runDatabaseMigrations(connection)).resolves.toBe(5);
+      await expect(runDatabaseMigrations(connection)).resolves.toBe(6);
       const metadata = await requireDatabase(connection)
         .collection<{ _id: string; version: number }>("schema_metadata")
         .findOne({ _id: "current" });
-      expect(metadata?.version).toBe(5);
+      expect(metadata?.version).toBe(6);
     });
   });
 

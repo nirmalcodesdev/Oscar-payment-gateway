@@ -86,12 +86,21 @@ export interface EvmProviderClient {
   getTransactionReceipt(
     transactionHash: `0x${string}`,
   ): Promise<EvmTransactionReceipt | undefined>;
+  getBlockTransactions(blockNumber: bigint): Promise<
+    readonly {
+      readonly hash: string;
+      readonly from: string;
+      readonly to?: string | null;
+      readonly value: bigint;
+    }[]
+  >;
   readErc20Balance(
     contract: Address,
     holder: Address,
     blockNumber: bigint,
   ): Promise<bigint>;
   readErc20Decimals(contract: Address, blockNumber: bigint): Promise<number>;
+  readNativeBalance(holder: Address, blockNumber: bigint): Promise<bigint>;
 }
 
 export interface EvmProviderClientFactory {
@@ -239,6 +248,26 @@ class ViemEvmProviderClient implements EvmProviderClient {
     }
   }
 
+  public async getBlockTransactions(blockNumber: bigint): Promise<
+    readonly {
+      readonly hash: string;
+      readonly from: string;
+      readonly to?: string | null;
+      readonly value: bigint;
+    }[]
+  > {
+    const block = await this.#client.getBlock({
+      blockNumber,
+      includeTransactions: true,
+    });
+    return block.transactions.map((transaction) => ({
+      hash: transaction.hash,
+      from: transaction.from,
+      to: transaction.to,
+      value: transaction.value,
+    }));
+  }
+
   public readErc20Balance(
     contract: Address,
     holder: Address,
@@ -260,6 +289,10 @@ class ViemEvmProviderClient implements EvmProviderClient {
       functionName: "decimals",
       blockNumber,
     });
+  }
+
+  public readNativeBalance(holder: Address, blockNumber: bigint): Promise<bigint> {
+    return this.#client.getBalance({ address: holder, blockNumber });
   }
 }
 

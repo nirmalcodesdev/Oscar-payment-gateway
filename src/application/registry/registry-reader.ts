@@ -28,9 +28,11 @@ export interface RegistryChainRecord {
 export interface RegistryTokenRecord {
   readonly tokenId: string;
   readonly chain: string;
+  readonly assetType: "erc20" | "native";
   readonly symbol: string;
-  readonly contractAddress: string;
-  readonly normalizedContractAddress: string;
+  /** Absent for native tokens (ADR 0018). */
+  readonly contractAddress?: string;
+  readonly normalizedContractAddress?: string;
   readonly decimals: number;
   readonly verificationPolicy: "event_only" | "balance_delta_required";
   readonly version: number;
@@ -77,6 +79,7 @@ export class EnabledRegistryReader {
       .select({
         tokenId: 1,
         chain: 1,
+        assetType: 1,
         symbol: 1,
         contractAddress: 1,
         normalizedContractAddress: 1,
@@ -112,9 +115,15 @@ export class EnabledRegistryReader {
       tokens.push({
         tokenId: doc.tokenId,
         chain: doc.chain,
+        assetType: doc.assetType,
         symbol: doc.symbol,
-        contractAddress: doc.contractAddress,
-        normalizedContractAddress: doc.normalizedContractAddress,
+        ...(doc.contractAddress === undefined || doc.contractAddress === null
+          ? {}
+          : { contractAddress: doc.contractAddress }),
+        ...(doc.normalizedContractAddress === undefined ||
+        doc.normalizedContractAddress === null
+          ? {}
+          : { normalizedContractAddress: doc.normalizedContractAddress }),
         decimals: doc.decimals,
         verificationPolicy: doc.verificationPolicy,
         version: doc.version,

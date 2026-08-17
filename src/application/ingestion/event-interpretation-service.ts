@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 
 import type { BalanceDeltaReader } from "../../domain/chain/chain-adapter.js";
 import { registerPersistenceModels } from "../../infrastructure/mongodb/models.js";
+import { evmAddressPattern } from "../../infrastructure/mongodb/schema-helpers.js";
 import { EnabledRegistryReader } from "../registry/registry-reader.js";
 
 export type InterpretationStatus = "accepted" | "rejected" | "review";
@@ -11,6 +12,8 @@ export type InterpretationReason =
   | "disabled_or_unknown_chain"
   | "unknown_or_disabled_token"
   | "malformed_log"
+  | "malformed_transaction"
+  | "nonzero_value_missing"
   | "unknown_recipient"
   | "balance_delta_disagreement"
   | "balance_delta_unavailable"
@@ -29,6 +32,18 @@ interface DecodedTransfer {
   readonly fromAddress: string;
   readonly toAddress: string;
   readonly amount: string;
+}
+
+/** Minimal event shape the native interpretation path reads (ADR 0018). */
+interface EventDocumentForInterpretation {
+  readonly eventId: string;
+  readonly chain: string;
+  readonly assetType?: string;
+  readonly normalizedFromAddress?: string | null;
+  readonly normalizedToAddress?: string | null;
+  readonly amount: string;
+  readonly blockNumber: number;
+  readonly rawEvent: Readonly<Record<string, unknown>>;
 }
 
 const addressTopicPattern = /^0x000000(00){9}[0-9a-fA-F]{40}$/;
@@ -74,6 +89,36 @@ export function decodeTransferFromRaw(
 }
 
 /**
+ * Re-derive the native transfer fields from the verbatim raw payload (the
+ * provider transaction). The raw capture is the source of truth; a payload whose
+ * value or shape does not match the normalized fields recorded at ingest is
+ * malformed.
+ */
+function decodeNativeTransferFromRaw(
+  rawEvent: Readonly<Record<string, unknown>>,
+): DecodedTransfer | undefined {
+  if (typeof rawEvent["value"] !== "string") return undefined;
+  const fromAddress = rawEvent["from"];
+  const toAddress = rawEvent["to"];
+  if (typeof fromAddress !== "string" || typeof toAddress !== "string")
+    return undefined;
+  if (!evmAddressPattern.test(fromAddress) || !evmAddressPattern.test(toAddress)) {
+    return undefined;
+  }
+  let amount: bigint;
+  try {
+    amount = BigInt(rawEvent["value"]);
+  } catch {
+    return undefined;
+  }
+  return {
+    fromAddress: fromAddress.toLowerCase(),
+    toAddress: toAddress.toLowerCase(),
+    amount: amount.toString(10),
+  };
+}
+
+/**
  * Interprets durably persisted raw on-chain events against the current
  * registry (ADR 0010). Raw capture fields are immutable; only the mutable
  * interpretation state is written, and only while it is still absent, so
@@ -113,6 +158,14 @@ export class EventInterpretationService {
       return this.#finalize(eventId, "rejected", "disabled_or_unknown_chain", {
         revision,
       });
+    }
+
+    if (event.assetType === "native") {
+      return this.#interpretNative(
+        event as unknown as EventDocumentForInterpretation,
+        registry,
+        revision,
+      );
     }
 
     const decoded = decodeTransferFromRaw(
@@ -156,7 +209,10 @@ export class EventInterpretationService {
     if (token.verificationPolicy === "balance_delta_required") {
       const read = await this.#balanceDeltas.readDelta({
         chain: event.chain,
-        contractAddress: event.normalizedContractAddress,
+        ...(event.normalizedContractAddress === undefined ||
+        event.normalizedContractAddress === null
+          ? {}
+          : { contractAddress: event.normalizedContractAddress }),
         holder: event.normalizedToAddress,
         blockNumber: event.blockNumber,
       });
@@ -193,6 +249,95 @@ export class EventInterpretationService {
     }
 
     return this.#finalize(eventId, "accepted", undefined, {
+      revision,
+      tokenId: token.tokenId,
+    });
+  }
+
+  /**
+   * Native interpretation (ADR 0018): derive canonical fields from the raw
+   * transaction payload, resolve the native token by `(chain, assetType)`, and
+   * apply the same balance-delta corroboration as ERC-20 high-risk tokens.
+   */
+  async #interpretNative(
+    event: EventDocumentForInterpretation,
+    registry: Awaited<ReturnType<EnabledRegistryReader["refresh"]>>,
+    revision: string,
+  ): Promise<InterpretationOutcome> {
+    const normalizedFrom = event.normalizedFromAddress;
+    const normalizedTo = event.normalizedToAddress;
+    if (
+      normalizedFrom === null ||
+      normalizedFrom === undefined ||
+      normalizedTo === null ||
+      normalizedTo === undefined
+    ) {
+      return this.#finalize(event.eventId, "rejected", "malformed_transaction", {
+        revision,
+      });
+    }
+    const decoded = decodeNativeTransferFromRaw(event.rawEvent);
+    const normalizedFieldsMatch =
+      decoded !== undefined &&
+      normalizedFrom.toLowerCase() === decoded.fromAddress &&
+      normalizedTo.toLowerCase() === decoded.toAddress &&
+      event.amount === decoded.amount;
+    if (decoded === undefined || !normalizedFieldsMatch) {
+      return this.#finalize(event.eventId, "rejected", "malformed_transaction", {
+        revision,
+      });
+    }
+    if (event.amount === "0") {
+      return this.#finalize(event.eventId, "rejected", "nonzero_value_missing", {
+        revision,
+      });
+    }
+    const token = registry.tokens.find(
+      ({ chain, assetType }) => chain === event.chain && assetType === "native",
+    );
+    if (token === undefined) {
+      return this.#finalize(event.eventId, "rejected", "unknown_or_disabled_token", {
+        revision,
+      });
+    }
+    const recipientKnown = await this.#isKnownRecipient(event.chain, normalizedTo);
+    if (!recipientKnown) {
+      return this.#finalize(event.eventId, "rejected", "unknown_recipient", {
+        revision,
+        tokenId: token.tokenId,
+      });
+    }
+    if (token.verificationPolicy === "balance_delta_required") {
+      const read = await this.#balanceDeltas.readDelta({
+        chain: event.chain,
+        holder: normalizedTo,
+        blockNumber: event.blockNumber,
+      });
+      if (read.status === "disagreement") {
+        return this.#finalize(event.eventId, "review", "balance_delta_disagreement", {
+          revision,
+          tokenId: token.tokenId,
+        });
+      }
+      if (read.status === "unavailable" || read.delta === undefined) {
+        return this.#finalize(event.eventId, "review", "balance_delta_unavailable", {
+          revision,
+          tokenId: token.tokenId,
+        });
+      }
+      if (BigInt(read.delta) <= 0n) {
+        return this.#finalize(event.eventId, "review", "balance_delta_negative", {
+          revision,
+          tokenId: token.tokenId,
+        });
+      }
+      return this.#finalize(event.eventId, "accepted", undefined, {
+        revision,
+        tokenId: token.tokenId,
+        verifiedReceivedAmount: read.delta,
+      });
+    }
+    return this.#finalize(event.eventId, "accepted", undefined, {
       revision,
       tokenId: token.tokenId,
     });

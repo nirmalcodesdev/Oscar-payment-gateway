@@ -56,11 +56,15 @@ const createTokenSchema = z
   .object({
     tokenId: identifier,
     chain: identifier,
+    assetType: z.enum(["erc20", "native"]).optional(),
     symbol: z
       .string()
       .trim()
       .regex(/^[A-Za-z0-9._-]{1,32}$/),
-    contractAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    contractAddress: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]{40}$/)
+      .optional(),
     decimals,
     minAmount: amount,
     maxAmount: amount,
@@ -240,10 +244,14 @@ export function createAdminRegistryRouter(
     "/admin/tokens",
     requireAdmin,
     asyncHandler(async (request, response) => {
-      const result = await registry.createToken(
-        requireAdminPrincipal(request),
-        parseBody(createTokenSchema, request.body),
-      );
+      const body = parseBody(createTokenSchema, request.body);
+      const result = await registry.createToken(requireAdminPrincipal(request), {
+        ...body,
+        assetType: body.assetType ?? "erc20",
+        ...(body.contractAddress === undefined
+          ? {}
+          : { contractAddress: body.contractAddress }),
+      });
       response.status(201).json(result);
     }),
   );

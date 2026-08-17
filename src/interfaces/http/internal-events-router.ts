@@ -38,11 +38,12 @@ const boundedCounter = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const ingestEventSchema = z
   .object({
     chain: z.string().regex(identifierPattern),
+    assetType: z.enum(["erc20", "native"]).optional(),
     transactionHash: z.string().regex(transactionHashPattern),
-    logIndex: boundedCounter,
+    logIndex: boundedCounter.optional(),
     blockNumber: boundedCounter,
     blockHash: z.string().regex(blockHashPattern),
-    contractAddress: z.string().regex(evmAddressPattern),
+    contractAddress: z.string().regex(evmAddressPattern).optional(),
     fromAddress: z.string().regex(evmAddressPattern),
     toAddress: z.string().regex(evmAddressPattern),
     amount: z

@@ -15,11 +15,12 @@ export interface EventEnqueuer {
 
 export interface IngestEventInput {
   readonly chain: string;
+  readonly assetType?: "erc20" | "native" | undefined;
   readonly transactionHash: string;
-  readonly logIndex: number;
+  readonly logIndex?: number | undefined;
   readonly blockNumber: number;
   readonly blockHash: string;
-  readonly contractAddress: string;
+  readonly contractAddress?: string | undefined;
   readonly fromAddress: string;
   readonly toAddress: string;
   readonly amount: string;
@@ -34,13 +35,18 @@ export interface IngestionOutcome {
 
 /**
  * Server-side event identity. Every producer and every retry collapses onto
- * one identity; clients never choose it.
+ * one identity; clients never choose it. Native value transfers are identified
+ * by transaction hash alone (ADR 0018).
  */
 export function deriveEventId(
   chain: string,
   transactionHash: string,
-  logIndex: number,
+  logIndex?: number,
 ): string {
+  if (logIndex === undefined) {
+    // Native value transfers are identified by transaction hash alone (ADR 0018).
+    return `native_tx_${transactionHash.toLowerCase()}`;
+  }
   const digest = createHash("sha256")
     .update(`${chain}|${transactionHash}|${logIndex}`, "utf8")
     .digest("hex");
@@ -76,15 +82,27 @@ export class EventIngestionService {
     if (!isBaseUnitString(input.amount)) {
       throw new TypeError("Event amount must be a canonical base-unit integer string");
     }
-    const eventId = deriveEventId(input.chain, input.transactionHash, input.logIndex);
+    const isNative = input.assetType === "native";
+    const eventId = deriveEventId(
+      input.chain,
+      input.transactionHash,
+      isNative ? undefined : input.logIndex,
+    );
     const ingestedAt = new Date();
     const document = {
       eventId,
       chain: input.chain,
-      contractAddress: input.contractAddress,
-      normalizedContractAddress: input.contractAddress.toLowerCase(),
+      assetType: input.assetType ?? "erc20",
+      ...(input.contractAddress === undefined
+        ? {}
+        : {
+            contractAddress: input.contractAddress,
+            normalizedContractAddress: input.contractAddress.toLowerCase(),
+          }),
       transactionHash: input.transactionHash,
-      logIndex: input.logIndex,
+      ...(input.logIndex === undefined
+        ? { logIndex: null }
+        : { logIndex: input.logIndex }),
       blockNumber: input.blockNumber,
       blockHash: input.blockHash,
       fromAddress: input.fromAddress,
