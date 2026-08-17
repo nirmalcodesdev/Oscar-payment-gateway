@@ -23,6 +23,15 @@ export class StaticSanctionsListProvider implements SanctionsScreeningProvider {
     );
   }
 
+  /**
+   * The environment list version. Exposed so the updateable provider can
+   * surface a stable version even when no managed list exists, keeping
+   * version-aware verdict invalidation exact across a managed-list retirement.
+   */
+  public get listVersion(): string {
+    return this.#listVersion;
+  }
+
   public screen(request: ScreeningRequest): Promise<ScreeningResult> {
     if (!/^0x[0-9a-fA-F]{40}$/.test(request.address)) {
       return Promise.resolve({

@@ -56,6 +56,12 @@ export interface ReviewDecisionInput {
   readonly evidence?: string;
 }
 
+export interface SanctionsListRetireResult {
+  readonly listId: string;
+  readonly listVersion: string | undefined;
+  readonly retired: boolean;
+}
+
 /**
  * Canonical content hash over the sorted unique normalized addresses
  * (ADR 0013): deterministic on both the submitting operator's side and the
@@ -192,6 +198,55 @@ export class ComplianceService {
       contentHash: computedHash,
       replacedVersion,
       rescreened,
+    };
+  }
+
+  /**
+   * Restore the "no managed list" state (ADR 0017): atomically retire the
+   * active list, if any, with the same append-only audit discipline as ingest,
+   * then invalidate the shared provider cache so the environment static list is
+   * served again. Adopted by the development-gated admin control so both the
+   * database and the API's in-process cache are reset deterministically.
+   * Retired lists are retained for audit; nothing is deleted.
+   */
+  public async retireActiveSanctionsList(
+    principal: AdminPrincipal,
+  ): Promise<SanctionsListRetireResult> {
+    const retiredAt = new Date();
+    let retired: { listId: string; listVersion: string } | undefined;
+    await withRequiredTransaction(this.#connection, async (session) => {
+      const active = await this.#models.SanctionsList.findOne({
+        status: "active",
+      }).session(session);
+      if (active !== null) {
+        await this.#models.SanctionsList.updateOne(
+          { listId: active.listId, status: "active" },
+          { $set: { status: "retired", retiredAt } },
+          { session },
+        );
+        retired = { listId: active.listId, listVersion: active.listVersion };
+      }
+      await appendAuditEntryInTransaction(
+        this.#connection,
+        {
+          scope: "compliance_sanctions_list",
+          entityType: "SanctionsList",
+          entityId: active?.listId ?? "active",
+          action: "sanctions_list_updated",
+          actorType: "admin",
+          actorId: principal.adminId,
+          before: { listVersion: active?.listVersion },
+          after: { listVersion: null },
+        },
+        session,
+      );
+    });
+
+    this.#provider?.invalidate();
+    return {
+      listId: retired?.listId ?? "no active",
+      listVersion: retired?.listVersion,
+      retired: retired !== undefined,
     };
   }
 

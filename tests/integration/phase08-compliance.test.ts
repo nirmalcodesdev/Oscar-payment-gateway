@@ -211,6 +211,23 @@ describeWithMongo("Phase 08 compliance controls", () => {
       expect(activeAfter?.listId).toBe(activeBefore?.listId);
     });
 
+    it("retires the active list and restores the static fallback (ADR 0017)", async () => {
+      await ingestList([sanctionedSender], `retire-${randomUUID().slice(0, 8)}`);
+      const result = await compliance.retireActiveSanctionsList(adminPrincipal());
+      expect(result.retired).toBe(true);
+      expect(result.listVersion).toMatch(/^retire-/);
+      await expect(
+        models.SanctionsList.countDocuments({ status: "active" }),
+      ).resolves.toBe(0);
+      await expect(provider.activeListVersion()).resolves.toBe("test-v1");
+      await expect(
+        screening.screen({ address: cleanSender, chain: chainId }),
+      ).resolves.toMatchObject({
+        provider: "static-list",
+        listVersion: "test-v1",
+      });
+    });
+
     it("rejects malformed addresses and empty lists", async () => {
       await expect(
         compliance.ingestSanctionsList(adminPrincipal(), {
@@ -506,6 +523,26 @@ describeWithMongo("Phase 08 compliance controls", () => {
       await expect(
         models.AuditLog.countDocuments({ entityId: body.listId }),
       ).resolves.toBeGreaterThanOrEqual(1);
+    });
+
+    it("resets to the static fallback through the development-gated retire control", async () => {
+      const response = await fetch(
+        `${apiBaseUrl}/api/v1/admin/compliance/sanctions-list/active`,
+        {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${apiToken}` },
+        },
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        retired: boolean;
+        listVersion?: string;
+      };
+      expect(body.retired).toBe(true);
+      expect(body.listVersion).toMatch(/^live-/);
+      await expect(
+        models.SanctionsList.countDocuments({ status: "active" }),
+      ).resolves.toBe(0);
     });
   });
 });

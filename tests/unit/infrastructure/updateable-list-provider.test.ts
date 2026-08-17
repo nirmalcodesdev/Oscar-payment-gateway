@@ -224,4 +224,9 @@ describe("UpdateableSanctionsListProvider", () => {
     });
     await expect(sut.activeListVersion()).resolves.toBe("managed-v9");
   });
+
+  it("falls back to the static-list version when no managed list exists", async () => {
+    const { provider: sut } = provider({});
+    await expect(sut.activeListVersion()).resolves.toBe("env-v1");
+  });
 });

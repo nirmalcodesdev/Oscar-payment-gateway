@@ -138,6 +138,26 @@ describeWithServices("Phase 05 live payment intent creation", () => {
     expect(login.response.status).toBe(200);
     adminAccess = (login.body as { accessToken: string }).accessToken;
 
+    // Hermetic provider state (ADR 0017): the shared API process may hold a
+    // managed list ingest from phase08 (or a prior run) in its 30-second
+    // in-memory cache. Retire any active managed list and reset the cache so
+    // every screening assertion in this suite observes the static-list
+    // fallback deterministically, independent of file ordering or run timing.
+    const reset = await request("/api/v1/admin/compliance/sanctions-list/active", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${adminAccess}` },
+    });
+    expect(reset.response.status, JSON.stringify(reset.body)).toBe(200);
+
+    // Tolerant of a leftover `USDC` token from an interrupted prior run (or
+    // phase06's fixture): the unique `uq_chain_token_symbol` index would
+    // otherwise reject token creation with a 409. Remove only this suite's
+    // own token id and any surviving USDC entry on this chain, then re-create.
+    await models.Token.collection.deleteMany({
+      chain: chainId,
+      $or: [{ tokenId }, { symbol: "USDC" }],
+    });
+
     const chain = await models.Chain.findOne({ chainId });
     const chainFixture = {
       networkFamily: "evm",
@@ -208,7 +228,6 @@ describeWithServices("Phase 05 live payment intent creation", () => {
     });
     await models.ComplianceScreening.collection.deleteMany({
       chain: chainId,
-      provider: "static-list",
       checkedAt: { $gte: new Date(Date.now() - 3_600_000) },
     });
     await models.Token.collection.deleteMany({ tokenId: { $in: tokenIds } });

@@ -182,5 +182,26 @@ export function createComplianceRouter(
     }),
   );
 
+  // Development-only control (ADR 0017): deterministically retire the active
+  // managed list and reset the in-process provider cache, restoring the static
+  // fallback. Compiled out of non-development builds so the route never exists
+  // in test or production deployments.
+  if (dependencies.config.nodeEnv === "development") {
+    router.delete(
+      "/admin/compliance/sanctions-list/active",
+      requireAdmin,
+      asyncHandler(async (request, response) => {
+        try {
+          const result = await service.retireActiveSanctionsList(
+            requireAdminPrincipal(request),
+          );
+          response.status(200).json(result);
+        } catch (error: unknown) {
+          throw asApplicationError(error);
+        }
+      }),
+    );
+  }
+
   return router;
 }
