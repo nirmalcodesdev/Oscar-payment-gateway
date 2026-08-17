@@ -11,3 +11,10 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+# local live-test artifacts (never committed)
+.test-seed.txt
+.test-accounts.json
+.compose.override.yml
+
+.admin-token

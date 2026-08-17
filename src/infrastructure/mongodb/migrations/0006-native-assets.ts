@@ -99,7 +99,7 @@ const onChainEventsValidator: Document = {
         pattern: normalizedAddressPattern,
       },
       transactionHash: { bsonType: "string", pattern: transactionHashPattern },
-      logIndex: { bsonType: ["int", "long", "double"], minimum: 0 },
+      logIndex: { bsonType: ["int", "long", "double", "null"] },
       blockNumber: { bsonType: ["int", "long", "double"], minimum: 0 },
       blockHash: { bsonType: "string", pattern: transactionHashPattern },
       fromAddress: { bsonType: "string", pattern: evmAddressPattern },
