@@ -179,27 +179,40 @@ export class MongoChainCursorStorage implements ChainCursorStorage {
   }
 
   /**
-   * Insert observed blocks that were not already persisted. This runs inside
-   * the cursor-advance transaction (ADR 0009) and deliberately does not catch
-   * duplicate-key errors: if another instance commits the same block first,
-   * the write fails and the transaction aborts rather than racing silently.
+   * Insert only the observed-block rows that are not already persisted, using an
+   * idempotent upsert keyed on the unique `{ chain, blockNumber, blockHash }`
+   * triple. A self re-insertion of an already committed block is benign and
+   * skipped; a competing instance that committed first still loses the race via
+   * the cursor version check. Upserting avoids the duplicate-key abort that a
+   * plain insert would raise when the same block identity is recorded again, for
+   * example after a reorg marked it non-canonical and it returned on replay.
    */
   async #insertObservedBlocks(
     headers: readonly ObservedBlockHeader[],
     session: ClientSession,
   ): Promise<void> {
     if (headers.length === 0) return;
-    await this.#models.ObservedBlock.create(
+    await this.#models.ObservedBlock.bulkWrite(
       headers.map((header) => ({
-        chain: this.#chain,
-        blockNumber: header.blockNumber,
-        blockHash: header.blockHash,
-        parentHash: header.parentHash,
-        canonical: true,
-        observedAt: new Date(),
+        updateOne: {
+          filter: {
+            chain: this.#chain,
+            blockNumber: header.blockNumber,
+            blockHash: header.blockHash,
+          },
+          update: {
+            $setOnInsert: {
+              chain: this.#chain,
+              blockNumber: header.blockNumber,
+              blockHash: header.blockHash,
+              parentHash: header.parentHash,
+              canonical: true,
+              observedAt: new Date(),
+            },
+          },
+          upsert: true,
+        },
       })),
-      // Ordered inserts stop at the first duplicate key so the transaction
-      // aborts instead of racing another instance that committed first.
       { session, ordered: true },
     );
   }
