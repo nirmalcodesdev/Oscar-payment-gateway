@@ -159,6 +159,7 @@ export function createMerchantSecurityRouter(
     dependencies.connection,
     auth,
     dependencies.config,
+    dependencies.redis,
   );
   const tenantRepositories = new MerchantScopedRepositories(dependencies.connection);
   const requireMerchant = merchantMiddleware(auth);

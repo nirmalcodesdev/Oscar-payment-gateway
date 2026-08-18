@@ -100,6 +100,7 @@ export function createPaymentsRouter(dependencies: PaymentsRouterDependencies): 
     rateLimiter,
     dependencies.screening,
     dependencies.logger,
+    dependencies.redis,
   );
   const requireMerchant = asyncMiddleware(async (request) => {
     const principal = await auth.authenticateMerchant(

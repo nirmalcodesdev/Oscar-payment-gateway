@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Connection } from "mongoose";
 import type { Logger } from "pino";
+import type { Redis } from "ioredis";
 
 import type { MerchantPrincipal } from "../auth/principals.js";
 import type { RuntimeConfig } from "../../config/environment.js";
@@ -21,6 +22,7 @@ import {
 } from "../../infrastructure/mongodb/audit-service.js";
 import { registerPersistenceModels } from "../../infrastructure/mongodb/models.js";
 import { withRequiredTransaction } from "../../infrastructure/mongodb/transactions.js";
+import { signalWalletWatchlistRefresh } from "../../infrastructure/redis/watchlist-refresh-signal.js";
 import {
   deriveReceivingAddress,
   maximumDerivationIndex,
@@ -85,6 +87,7 @@ export class PaymentService {
   readonly #screening: SanctionsScreeningProvider;
   readonly #snapshots: RegistrySnapshotRepository;
   readonly #logger: Logger;
+  readonly #redis: Redis | undefined;
 
   public constructor(
     connection: Connection,
@@ -92,6 +95,7 @@ export class PaymentService {
     rateLimiter: RedisRateLimiter,
     screening: SanctionsScreeningProvider,
     logger: Logger,
+    redis?: Redis,
   ) {
     this.#connection = connection;
     this.#models = registerPersistenceModels(connection);
@@ -100,6 +104,7 @@ export class PaymentService {
     this.#screening = screening;
     this.#snapshots = new RegistrySnapshotRepository(connection);
     this.#logger = logger;
+    this.#redis = redis;
   }
 
   async #consumeCreationQuota(principal: MerchantPrincipal): Promise<void> {
@@ -386,6 +391,9 @@ export class PaymentService {
       }
       return body;
     });
+    if (this.#redis !== undefined) {
+      signalWalletWatchlistRefresh(this.#redis, this.#config.redis.queuePrefix);
+    }
     return { statusCode: 201, body: created, replayed: false };
   }
 
