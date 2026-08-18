@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ClientSession, Connection } from "mongoose";
+import type { Redis } from "ioredis";
 
 import type { RuntimeConfig } from "../../config/environment.js";
 import { ApplicationError } from "../../domain/errors/application-error.js";
@@ -11,6 +12,7 @@ import { hashSecret } from "../../infrastructure/auth/secret-hasher.js";
 import { appendAuditEntryInTransaction } from "../../infrastructure/mongodb/audit-service.js";
 import { registerPersistenceModels } from "../../infrastructure/mongodb/models.js";
 import { withRequiredTransaction } from "../../infrastructure/mongodb/transactions.js";
+import { signalWalletWatchlistRefresh } from "../../infrastructure/redis/watchlist-refresh-signal.js";
 import { validateXpub } from "../../infrastructure/wallet/xpub-service.js";
 
 const defaultMerchantScopes = [
@@ -52,12 +54,19 @@ export class MerchantService {
   readonly #models: ReturnType<typeof registerPersistenceModels>;
   readonly #auth: AuthService;
   readonly #config: RuntimeConfig;
+  readonly #redis: Redis | undefined;
 
-  public constructor(connection: Connection, auth: AuthService, config: RuntimeConfig) {
+  public constructor(
+    connection: Connection,
+    auth: AuthService,
+    config: RuntimeConfig,
+    redis?: Redis,
+  ) {
     this.#connection = connection;
     this.#models = registerPersistenceModels(connection);
     this.#auth = auth;
     this.#config = config;
+    this.#redis = redis;
   }
 
   public async register(email: string) {
@@ -545,6 +554,11 @@ export class MerchantService {
         session,
       );
     });
+    if (this.#redis !== undefined) {
+      // A newly registered/rotated wallet is watchable immediately; signal the
+      // watcher so a deposit within the next poll interval cannot be missed.
+      signalWalletWatchlistRefresh(this.#redis, this.#config.redis.queuePrefix);
+    }
     return {
       xpubId,
       chain,

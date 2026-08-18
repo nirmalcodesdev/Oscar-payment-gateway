@@ -118,6 +118,7 @@ function createRuntime(processName: ProcessName): Runtime {
       connection: mongo.connection,
       config,
       logger,
+      redis: redis.client,
     });
     return {
       logger,

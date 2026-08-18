@@ -1,5 +1,6 @@
 import type { Connection } from "mongoose";
 import type { Logger } from "pino";
+import type { Redis } from "ioredis";
 
 import type { RuntimeConfig } from "../../config/environment.js";
 import {
@@ -20,12 +21,14 @@ import { EvmDecimalGuard } from "../chain/decimal-guard.js";
 import { MongoChainCursorStorage } from "../chain/mongo-cursor-storage.js";
 import type { EvmProviderClientFactory } from "../chain/evm-registry-verifier.js";
 import { SignedIngestionClient } from "../http/ingestion-client.js";
+import { walletWatchlistRefreshChannel } from "../redis/watchlist-refresh-signal.js";
 import type { ManagedResource } from "./managed-resource.js";
 
 export interface WatcherResourceOptions {
   readonly connection: Connection;
   readonly config: RuntimeConfig;
   readonly logger: Logger;
+  readonly redis?: Redis;
   readonly providerFactory?: EvmProviderClientFactory;
   readonly logDecoder?: WatcherLogDecoder;
 }
@@ -103,6 +106,18 @@ export class WatcherResource implements ManagedResource {
         },
       },
     });
+
+    if (options.redis !== undefined) {
+      const channel = walletWatchlistRefreshChannel(options.config.redis.queuePrefix);
+      options.redis.on("message", (rx, message) => {
+        if (rx === channel && message === "refresh") {
+          void this.#service.refreshRegistry();
+        }
+      });
+      options.redis.subscribe(channel).catch(() => {
+        // Best effort; the polling timer remains the fallback.
+      });
+    }
   }
 
   public async start(): Promise<void> {
