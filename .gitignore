@@ -24,3 +24,8 @@ Thumbs.db
 .webhook-received.log
 
 .live-evidence.json
+
+# transient live-test scratch
+.*.mjs
+.*.json
+.webhook-received.log

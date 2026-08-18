@@ -4,3 +4,7 @@ node_modules
 package-lock.json
 prompt.md
 phases.md
+
+# local live-test scratch artifacts
+.*.mjs
+.*.json
