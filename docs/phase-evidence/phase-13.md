@@ -73,6 +73,33 @@ Accepted for this phase:
   array was ahead (an interrupted prior run); it now treats the array as
   authoritative and self-repairs the field.
 
+## Live-chain validation
+
+Beyond the automated gates, the native and ERC-20 happy paths were exercised
+against live Sepolia and Base Sepolia testnets (real funds, no mocks):
+
+- Native deposits confirmed at the configured 12-block depth with exact amount
+  receipts, signed `payment.confirmed` webhook delivered with a valid HMAC.
+- ERC-20 deployed, registered, and activated with live `symbol()`/`decimals()`
+  verification.
+- Financial edges observed live: overpay confirmed with exact excess and a
+  reconciliation annotation; wrong-token deposit rejected; late-after-expiry
+  deposits routed to reconciliation, never auto-credited.
+- Compliance hold→release exercised live: a sanctioned sender deposit was matched,
+  held (`screeningStatus: blocked`), then released via an audited admin decision
+  to `screeningStatus: clear`.
+- Fail-closed behavior observed live: the durable cursor holds the chain when the
+  independent-provider header corroboration disagrees at the tip.
+
+Two additional defects found and fixed live:
+
+- Wallet registration raced the watcher's periodic registry refresh, so a deposit
+  in that window could be missed; fixed with a Redis pub/sub signal that refreshes
+  the watcher immediately (commit `78edd03`).
+- Observed-block cursor advance could abort on a duplicate-key when a block was
+  re-observed with an already-recorded identity; fixed by an idempotent upsert
+  (commit `ae81bd3`).
+
 ## Completion decision
 
 Every Phase 13 deliverable passes its gate. The branch is eligible for its
