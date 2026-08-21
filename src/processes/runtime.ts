@@ -45,6 +45,7 @@ import { HttpServerResource } from "../interfaces/http/http-server-resource.js";
 import { createInternalEventsRouter } from "../interfaces/http/internal-events-router.js";
 import { createMerchantSecurityRouter } from "../interfaces/http/merchant-security-router.js";
 import { createPaymentsRouter } from "../interfaces/http/payments-router.js";
+import { createPublicRegistryRouter } from "../interfaces/http/public-registry-router.js";
 
 interface Runtime {
   readonly logger: Logger;
@@ -290,6 +291,7 @@ function createRuntime(processName: ProcessName): Runtime {
       complianceRouter,
       reconciliationRouter,
       internalEventsRouter,
+      createPublicRegistryRouter(mongo.connection),
     ],
     security: {
       corsAllowedOrigins: config.http.corsAllowedOrigins,
