@@ -55,6 +55,10 @@ export function signedWebhookHeaders(
   return {
     headers: {
       "content-type": "application/json",
+      // Some receivers and tunnels (e.g. ngrok) reject requests without a
+      // User-Agent with 404; the signature covers only timestamp, delivery
+      // id, and body, so this header does not affect verification.
+      "user-agent": "oscar-payment-gateway-webhooks/1.0",
       [webhookHeaderNames.keyId]: signed.keyId,
       [webhookHeaderNames.timestamp]: signed.timestamp,
       [webhookHeaderNames.deliveryId]: signed.deliveryId,
