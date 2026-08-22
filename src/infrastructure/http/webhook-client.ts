@@ -219,6 +219,10 @@ export class WebhookDeliveryClient {
           host: targetIp,
           port,
           method: "POST",
+          // The request line must carry the webhook URL's path and query;
+          // without it every delivery would POST to "/" (masked by any
+          // receiver that answers 2xx on all paths).
+          path: `${parsed.pathname}${parsed.search}`,
           // Host and TLS SNI keep the original hostname; only the dialed
           // IP is pinned to the validated address.
           servername: isTls ? parsed.hostname : undefined,
